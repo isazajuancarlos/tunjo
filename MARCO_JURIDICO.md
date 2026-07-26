@@ -8,7 +8,9 @@ Investigación previa al diseño de Tunjo. Cada afirmación va con su fuente
 consultada; lo que no pude contrastar contra el texto oficial queda marcado como
 **pendiente de verificar** en vez de darse por bueno.
 
-Fecha de consulta: **26 de julio de 2026**.
+Fecha de consulta: **26 de julio de 2026**. Las fuentes que quedaron abiertas en
+la primera vuelta se verificaron el mismo día; lo que sigue sin comprobar está
+marcado y es solo lo que no pude leer en su texto original.
 
 ---
 
@@ -116,13 +118,64 @@ método declarado; `fechas` → registro horario en UTC con el desfase local. Lo
 un formato de papel resuelve con firmas sucesivas, aquí lo resuelve la firma
 criptográfica sobre el conjunto.
 
-**Pendiente de verificar:** el texto de los artículos 255 a 257 (responsabilidad,
-aseguramiento e identificación) no pude recuperarlo del sitio consultado; hay que
-contrastarlo con la edición oficial antes de citarlo. Igual con el **Manual de
-Cadena de Custodia de la Fiscalía General de la Nación**, que es el que aplican
-los peritos en materia penal y conviene mapear campo a campo.
+### 3.1 A quién obliga — art. 255
 
-**Fuente:** [CPP art. 254](https://leyes.co/codigo_de_procedimiento_penal/254.htm).
+La responsabilidad no es solo de los servidores públicos:
+
+> «Los particulares que por razón de su trabajo o por el cumplimiento de las
+> funciones propias de su cargo […] entren en contacto con elementos materiales
+> probatorios y evidencia física, son responsables por su recolección,
+> preservación y entrega a la autoridad correspondiente.»
+
+**Consecuencia para un perito de parte:** la cadena de custodia lo obliga
+directamente, no por analogía. No es una buena práctica que adopta por
+prudencia: es el estándar con el que se mide su trabajo.
+
+### 3.2 La sustitución del objeto por su representación — art. 256
+
+Para «macroelementos» —naves, aeronaves, vehículos, máquinas, grúas y similares—
+el objeto se documenta por videograbación o fotografía, **y esas imágenes
+reemplazan al objeto físico en el juicio oral**.
+
+**Por qué importa aquí, y no es una analogía forzada:** el ordenamiento ya acepta
+que un elemento probatorio se sustituya por su representación fiel cuando
+conservar el original es impracticable. Un servidor en producción es exactamente
+ese caso — no se incauta, se copia. Lo que el artículo exige a cambio es que la
+representación sea fiel y esté documentada, que es justo lo que un sello acredita.
+
+### 3.3 Quién custodia — art. 257
+
+> «El servidor público que, en actuación de indagación o investigación policial,
+> hubiere embalado y rotulado el elemento material probatorio y evidencia física,
+> lo custodiará.»
+
+Quien embala responde. En digital, «embalar y rotular» es precisamente calcular
+la huella y levantar el acta.
+
+### 3.4 El manual de la Fiscalía
+
+El vigente se adoptó por **Resolución 2369 de 2016** de la Fiscalía General de la
+Nación, rige desde el **1 de agosto de 2016** en todo el territorio y —art. 2—
+obliga a «cada servidor público y particular que tenga relación con elementos
+materiales probatorios y evidencia física». Derogó la Resolución 0-1874 de 2016.
+
+**Hallazgo, y es el que da sentido a este proyecto:** la resolución **no contiene
+disposiciones específicas sobre evidencia digital**. El sistema de cadena de
+custodia colombiano está construido sobre el objeto físico —embalaje, rótulo,
+traslado—, y para un disco o un buzón esas categorías hay que traducirlas. La
+traducción no está en la norma; la pone el perito, y por eso tiene que poder
+justificarla.
+
+**Pendiente de verificar:** el texto íntegro del manual anexo a la Resolución
+2369 (no solo la resolución que lo adopta), para mapear campo a campo su formato
+de rótulo contra los del acta.
+
+**Fuentes:** [CPP art. 254](https://leyes.co/codigo_de_procedimiento_penal/254.htm),
+[art. 255](https://leyes.co/codigo_de_procedimiento_penal/255.htm),
+[art. 256](https://leyes.co/codigo_de_procedimiento_penal/256.htm),
+[art. 257](https://leyes.co/codigo_de_procedimiento_penal/257.htm);
+[Resolución FGN 2369 de 2016 (normograma JEP)](https://jurinfo.jep.gov.co/normograma/compilacion/docs/resolucion_fiscalia_2369_2016.htm);
+[Manual de cadena de custodia (FGN)](https://www.fiscalia.gov.co/colombia/wp-content/uploads/policiajudicial/DOC-CNPJ/Manual%20de%20cadena%20custodia.pdf).
 
 ---
 
@@ -171,8 +224,36 @@ Por eso el acta obliga a declarar cómo se contrastó el reloj, y si no se decla
 no implementado— es el sello de tiempo de un tercero (RFC 3161) o el anclaje del
 hash en un medio público, que sí da fecha cierta.
 
-**Pendiente de verificar:** qué autoridades de sellado de tiempo están acreditadas
-en Colombia y bajo qué régimen (ONAC / entidades de certificación digital).
+### 5.1 En Colombia eso tiene régimen propio, y encaja
+
+**Verificado en fuente primaria**, y el resultado es mejor de lo esperado: el
+sellado de tiempo no es aquí un servicio informal, sino una **actividad
+acreditada**.
+
+- El **artículo 161, numeral 5, del Decreto Ley 019 de 2012** enumera entre las
+  actividades de las entidades de certificación digital: «ofrecer o facilitar los
+  servicios de registro y **estampado cronológico** en la generación, transmisión
+  y recepción de mensajes de datos».
+- **ONAC** acredita esa actividad bajo el criterio **CEA-3.0-07**, y el anexo del
+  certificado lista como documento normativo del servicio, literalmente, **RFC
+  3161 (agosto 2001)** —junto con RFC 3628, RFC 5905, SHA-256 y FIPS 140-2 nivel
+  3—.
+- Ejemplo concreto y comprobado: **OLIMPIA IT S.A.S**, acreditación
+  **21-ECD-001**, con «Estampado cronológico» en el alcance aprobado y vigencia
+  hasta el 30 de junio de 2029.
+- Marco de requisitos de la entidad: Ley 527 de 1999, Decreto Ley 019 de 2012 y
+  **Decreto 333 de 2014**.
+
+**Consecuencia de diseño:** el sello de tiempo que Tunjo tiene previsto **es
+exactamente el protocolo que ONAC usa para acreditar el servicio en Colombia**.
+No hay que elegir entre lo técnicamente correcto y lo jurídicamente reconocido:
+es el mismo RFC. Al implementarlo, la fecha deja de depender del reloj del perito
+y pasa a apoyarse en un tercero acreditado — que es lo que convierte el orden
+relativo en fecha oponible.
+
+**Fuentes:** [ONAC — esquema ECD](https://onac.org.co/informacion-por-esquemas-de-acreditacion/certificacion-digital-ecd/);
+[certificado 21-ECD-001 y su anexo de alcance (PDF)](https://onac.org.co/certificados/21-ECD-001.pdf);
+[directorio de acreditados](https://onac.org.co/directorio-de-acreditados/).
 
 ---
 
@@ -189,9 +270,15 @@ datos (art. 8). La Corte Suprema lo confirmó en STC3964 de 2023.
 escasea no es el reconocimiento legal del formato, sino la prueba de su
 integridad cuando alguien la discute.
 
-**Pendiente de verificar:** la numeración (arts. 5 y 8) y la referencia a
-STC3964 de 2023 provienen de fuentes secundarias, no del texto oficial ni de la
-providencia. Contrastarlas antes de citarlas en un escrito.
+**Verificado** contra el texto de la ley: el **artículo 5** es el de los poderes
+—«se podrán conferir mediante mensaje de datos, sin firma manuscrita o digital,
+con la sola antefirma»— y el **artículo 8** el de las notificaciones personales
+por mensaje de datos, que se entienden surtidas transcurridos dos días hábiles
+desde el envío.
+
+**Pendiente de verificar:** la referencia a **STC3964 de 2023** viene de fuente
+secundaria; no he leído la providencia. No citarla en un escrito sin contrastar
+radicado y contenido.
 
 **Fuente:** [Ley 2213 de 2022 — Función Pública](https://www.funcionpublica.gov.co/eva/gestornormativo/norma.php?i=187626).
 
@@ -239,11 +326,17 @@ hizo el perito» y pasa a ser un estándar internacional al que el perito se
 sujeta, que es lo que el art. 226 del CGP pregunta cuando indaga si el método
 difiere del usual en la profesión.
 
-**Pendiente de verificar:** el texto de 27037 es de pago; lo consultado son
-resúmenes técnicos. Antes de afirmar conformidad hay que leer la norma. **No
-declarar «cumple ISO 27037» hasta entonces** — es exactamente el tipo de
-afirmación que se cae en contrainterrogatorio. Relacionadas: 27041 (idoneidad del
-método), 27042 (análisis e interpretación), 27043 (principios de investigación).
+**Estado de la norma, verificado:** la edición vigente sigue siendo la primera,
+**ISO/IEC 27037:2012**, *confirmada sin cambios en 2018*. No está retirada ni
+sustituida, así que citarla no arrastra el defecto de invocar una norma derogada.
+
+**Lo que sigue pendiente, y la regla no cambia:** el texto es de pago y no lo he
+leído; lo consultado son resúmenes técnicos y el resumen de alcance del catálogo.
+**No declarar «cumple ISO 27037» hasta leerla** — es exactamente el tipo de
+afirmación que se cae en contrainterrogatorio, y la diferencia entre «sigue los
+principios de» y «cumple» es justo la que la contraparte va a explotar.
+Relacionadas: 27041 (idoneidad del método), 27042 (análisis e interpretación),
+27043 (principios de investigación).
 
 **Fuentes:** [ISO/IEC 27037 — resumen](https://ciberseguridad.com/normativa/espana/iso-iec-27037-evidencia-digital/);
 [guía de cadena de custodia digital](https://guiacadenadecustodiadigital.wordpress.com/iso-27037/).
