@@ -204,21 +204,55 @@ El manual adoptado consta de **once apartados** (art. 7), entre ellos «Aspectos
 transversales al Sistema de Cadena de Custodia», «Procedimientos del Sistema» y
 «Formatos».
 
-**Pendiente de verificar, y es lo que falta para cerrar del todo:** tengo el
-**acto que adopta** el manual, no el texto de sus once apartados. Sin él no puedo
-afirmar si la versión de 2018 trata la evidencia digital ni si incorpora el hash
-—hay fuentes secundarias que lo sostienen y no las he podido comprobar—. La
-observación de que el sistema está construido sobre el objeto físico se apoya en
-la edición anterior, cuyo índice sí leí; para la vigente, es una hipótesis.
+### 3.4.1 Qué dice el manual vigente sobre evidencia digital
 
-**Nota de procedencia, por coherencia con lo que este proyecto predica:** la copia
-del Acuerdo se descargó de `medicinalegal.gov.co`, cuya cadena TLS no validó en
-la consulta; hubo que desactivar la verificación del certificado. El documento es
-internamente consistente y aparece firmado, pero **una copia obtenida por un canal
-que no se pudo autenticar no es una fuente primaria en sentido estricto**. Antes
-de citarlo en un dictamen, contrastarlo contra otra copia oficial.
-SHA-256 de la copia consultada:
-`de7471770a3d4c27de1e15ea90d00ac402f6933a1854bd720151ab3b089eb632`.
+Leído su texto completo —72 páginas—, y el resultado es más preciso, y mejor
+para este proyecto, que la hipótesis que había aquí.
+
+**Sí regula la evidencia digital, y con detalle.** Los EMP y EF «de tipo digital»
+se embalan «en bolsas antiestáticas o materiales que permitan repeler la energía
+electromagnética», y no se pasan por escáneres ni detectores de metales «para
+evitar el posible borrado o deterioro de la información en ellos contenida». Los
+dispositivos de almacenamiento —computadores, USB, discos duros— llevan fijación
+fotográfica de la pantalla, se desconectan «directamente desde la fuente de
+alimentación» y a los portátiles se les quita la batería; nada de rótulos
+adhesivos sobre la superficie ni marcadores sobre medios ópticos. Los celulares
+se mantienen encendidos y se aíslan de señales, «modo avión, bolsa Faraday, entre
+otros». Y el manual cita expresamente la **Ley 527 de 1999** al definir el
+mensaje de datos.
+
+**Y sin embargo, la palabra «hash» no aparece ni una sola vez en las 72
+páginas.** Tampoco ninguna verificación de integridad del contenido. Vale la pena
+señalarlo porque circulan fuentes secundarias que afirman lo contrario —que la
+Fiscalía introdujo el hash en el manual de cadena de custodia—; contrastado
+contra el texto, **es falso**.
+
+**El hallazgo, entonces, es este:** el modelo de riesgo del manual para lo
+digital es el **daño físico del soporte**. Lo dice él mismo: «la evidencia
+digital es susceptible a daños a consecuencia de caídas, golpes, vibraciones».
+Caída, campo electromagnético, borrado accidental. Todo lo que prescribe protege
+**el objeto que contiene los bits**; nada protege **los bits**.
+
+Un disco puede llegar al laboratorio en su bolsa antiestática, sin un rasguño,
+con la cadena de custodia impecablemente diligenciada, y con su contenido
+modificado. El sistema vigente no tiene cómo advertirlo — y esa es exactamente la
+distancia que una huella criptográfica cubre. No es un vacío por descuido: es que
+la cadena de custodia se diseñó para objetos, y un archivo no es un objeto.
+
+**Procedencia de las copias, por coherencia con lo que este proyecto predica:**
+
+| Documento | Origen | SHA-256 |
+|---|---|---|
+| Acuerdo 001 de 2018 | `medicinalegal.gov.co` — **cadena TLS que no valida**, hubo que desactivar la verificación del certificado | `de747177…89eb632` |
+| Manual del Sistema de Cadena de Custodia (72 pp., PDF de 2018-12-27) | Wayback Machine, captura del 2019-07-18 de `fiscalia.gov.co/colombia/wp-content/uploads/MANUAL-DEL-SISTEMA-DE-CADENA-DE-CUSTODIA.pdf`; **hoy esa URL da 404** | `2e060346…435c5bb` |
+
+Ninguna de las dos es una fuente primaria en sentido estricto: una llegó por un
+canal que no se pudo autenticar y la otra por un archivo de terceros porque el
+sitio oficial ya no la publica. El manual **se identifica a sí mismo** como
+adoptado por el «Acuerdo 001 de abril 18 de 2018 del Consejo Nacional de Policía
+Judicial», lo que corrobora ambos documentos entre sí. Aun así, antes de citarlos
+en un dictamen conviene pedir copia a la entidad — y la ironía no se escapa: la
+norma que regula la cadena de custodia no se consigue hoy con cadena de custodia.
 
 **Hallazgo, y es el que da sentido a este proyecto:** la resolución **no contiene
 disposiciones específicas sobre evidencia digital**. El sistema de cadena de
@@ -239,9 +273,9 @@ entidades prestadoras de servicios de salud—, **nunca por su naturaleza**. No
 había procedimiento de evidencia digital, y no parece un descuido: el sistema
 está construido sobre el objeto que se embala, se traslada y se almacena.
 
-Se deja constancia porque es el antecedente que explica el enfoque —y porque
-sirve de hipótesis a verificar contra la edición de 2018—, no como descripción
-del derecho vigente.
+Se deja constancia porque es el antecedente que explica el enfoque, no como
+descripción del derecho vigente. La edición de 2018 sí incorporó lo digital,
+aunque solo en su dimensión física: ver §3.4.1.
 
 **Fuentes:** [CPP art. 254](https://leyes.co/codigo_de_procedimiento_penal/254.htm),
 [art. 255](https://leyes.co/codigo_de_procedimiento_penal/255.htm),
