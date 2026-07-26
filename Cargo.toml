@@ -1,0 +1,29 @@
+# SPDX-FileCopyrightText: 2026 Juan Carlos Isaza Arenas
+# SPDX-License-Identifier: AGPL-3.0-or-later
+[package]
+name = "tunjo"
+version = "0.1.0"
+edition = "2024"
+description = "Sellado criptográfico y acta de cadena de custodia para evidencia digital, con firma post-cuántica."
+authors = ["Juan Carlos Isaza Arenas <isazajuancarlos@gmail.com>"]
+license = "AGPL-3.0-or-later"
+keywords = ["forensics", "chain-of-custody", "post-quantum", "evidence", "peritaje"]
+categories = ["command-line-utilities", "cryptography"]
+readme = "README.md"
+
+[dependencies]
+# La firma triple-híbrida (Ed25519 + ML-DSA-87 + SLH-DSA) y el contenedor
+# cifrado con el que se protege la clave del perito vienen de Quipu.
+quipu = { version = "0.9.1", path = "../decod", features = ["slh"] }
+sha2 = "0.11"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+clap = { version = "4", features = ["derive"] }
+chrono = { version = "0.4", features = ["clock"] }
+base64 = "0.22"
+walkdir = "2"
+anyhow = "1"
+rpassword = "7"
+
+[dev-dependencies]
+tempfile = "3"

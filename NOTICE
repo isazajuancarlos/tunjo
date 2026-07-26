@@ -1,0 +1,41 @@
+Tunjo — sellado criptográfico de evidencia digital y acta de cadena de custodia
+Copyright (C) 2026 Juan Carlos Isaza Arenas
+
+Este programa es software libre: puede redistribuirlo y/o modificarlo bajo los
+términos de la Licencia Pública General Affero de GNU publicada por la Free
+Software Foundation, en su versión 3 o cualquier versión posterior.
+
+Se distribuye con la esperanza de que sea útil, pero SIN NINGUNA GARANTÍA; ni
+siquiera la garantía implícita de COMERCIABILIDAD o IDONEIDAD PARA UN PROPÓSITO
+PARTICULAR. Consulte la Licencia Pública General Affero de GNU para más detalles.
+
+--------------------------------------------------------------------------------
+
+Titularidad
+-----------
+
+Autor y titular de los derechos patrimoniales: Juan Carlos Isaza Arenas.
+Contacto: isazajuancarlos@gmail.com
+
+"Xiliux" es un nombre comercial y no una persona jurídica; la titularidad de esta
+obra corresponde a la persona natural indicada.
+
+Componentes de terceros
+-----------------------
+
+Este programa usa Quipu (https://github.com/isazajuancarlos/quipu),
+AGPL-3.0-or-later, del mismo titular, para la firma triple-híbrida (Ed25519 +
+ML-DSA-87 + SLH-DSA) y para el contenedor cifrado que protege la clave del
+perito.
+
+Las demás dependencias son bibliotecas de código abierto del ecosistema Rust,
+bajo sus respectivas licencias; el detalle exacto y sus versiones constan en
+Cargo.lock.
+
+Sobre el verificador
+--------------------
+
+La función de verificación de actas es y seguirá siendo software libre de código
+público. No es una concesión: un sello que solo su autor puede comprobar no es
+prueba de nada. Cualquier licencia comercial que llegue a ofrecerse sobre este
+programa no podrá restringir la verificación independiente de un acta ya emitida.

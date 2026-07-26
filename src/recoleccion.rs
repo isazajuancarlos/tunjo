@@ -1,0 +1,238 @@
+// SPDX-FileCopyrightText: 2026 Juan Carlos Isaza Arenas
+// SPDX-License-Identifier: AGPL-3.0-or-later
+//! Recorrido y hash del origen. **Solo lectura**: esta herramienta nunca
+//! escribe dentro de lo que sella. Lo que no puede leer, lo dice.
+
+use std::fs::File;
+use std::io::Read;
+use std::path::{Path, PathBuf};
+
+use anyhow::{Context, Result};
+use chrono::{DateTime, Utc};
+use sha2::{Digest, Sha256};
+use walkdir::WalkDir;
+
+use crate::acta::{Elemento, hex};
+
+/// Trozo de lectura. Los archivos se hashean por partes para que una imagen de
+/// disco de 500 GB no exija 500 GB de RAM.
+const TROZO: usize = 1 << 20;
+
+fn ruta_relativa(base: &Path, ruta: &Path) -> String {
+    let rel = ruta.strip_prefix(base).unwrap_or(ruta);
+    // Separador `/` siempre: el acta se firma en una máquina y se verifica en
+    // otra, y en Windows el separador nativo cambiaría los bytes firmados.
+    rel.components()
+        .map(|c| c.as_os_str().to_string_lossy().into_owned())
+        .collect::<Vec<_>>()
+        .join("/")
+}
+
+fn modificado(meta: &std::fs::Metadata) -> String {
+    // Si el sistema de archivos no expone la fecha, queda VACÍA. No se
+    // sustituye por la hora actual: un dato inventado en un acta es peor que
+    // un dato ausente, porque nadie lo distingue del real.
+    match meta.modified() {
+        Ok(t) => DateTime::<Utc>::from(t).to_rfc3339_opts(chrono::SecondsFormat::Secs, true),
+        Err(_) => String::new(),
+    }
+}
+
+fn hash_archivo(ruta: &Path) -> Result<(u64, String)> {
+    let mut f = File::open(ruta)?;
+    let mut h = Sha256::new();
+    let mut buf = vec![0u8; TROZO];
+    let mut total = 0u64;
+    loop {
+        let n = f.read(&mut buf)?;
+        if n == 0 {
+            break;
+        }
+        h.update(&buf[..n]);
+        total += n as u64;
+    }
+    Ok((total, hex(&h.finalize())))
+}
+
+/// Resultado del recorrido: los elementos y cuántos fallaron.
+pub struct Recoleccion {
+    pub elementos: Vec<Elemento>,
+    pub ilegibles: Vec<String>,
+}
+
+/// Recorre `origen` —un archivo o un directorio— y devuelve sus elementos
+/// ordenados por ruta.
+///
+/// El orden es alfabético y no el que devuelva el sistema de archivos: dos
+/// adquisiciones del mismo material tienen que producir la misma raíz, y el
+/// orden de `readdir` no está garantizado entre máquinas ni entre corridas.
+pub fn recolectar(origen: &Path) -> Result<Recoleccion> {
+    let origen = origen
+        .canonicalize()
+        .with_context(|| format!("no se puede acceder al origen {}", origen.display()))?;
+
+    let mut elementos = Vec::new();
+    let mut ilegibles = Vec::new();
+
+    if origen.is_file() {
+        let nombre = origen
+            .file_name()
+            .map(|n| n.to_string_lossy().into_owned())
+            .unwrap_or_else(|| origen.display().to_string());
+        elementos.push(elemento_de_archivo(&origen, nombre, &mut ilegibles));
+        return Ok(Recoleccion { elementos, ilegibles });
+    }
+
+    let mut entradas: Vec<PathBuf> = Vec::new();
+    for e in WalkDir::new(&origen).follow_links(false).min_depth(1) {
+        match e {
+            Ok(e) => entradas.push(e.into_path()),
+            Err(err) => ilegibles.push(format!(
+                "{}: {err}",
+                err.path().map(|p| p.display().to_string()).unwrap_or_else(|| "?".into())
+            )),
+        }
+    }
+    entradas.sort();
+
+    for ruta in entradas {
+        let rel = ruta_relativa(&origen, &ruta);
+        let meta = match std::fs::symlink_metadata(&ruta) {
+            Ok(m) => m,
+            Err(err) => {
+                ilegibles.push(format!("{rel}: {err}"));
+                elementos.push(Elemento {
+                    ruta: rel,
+                    tipo: "desconocido".into(),
+                    bytes: 0,
+                    sha256: String::new(),
+                    modificado_utc: String::new(),
+                    estado: format!("ERROR: {err}"),
+                });
+                continue;
+            }
+        };
+
+        if meta.file_type().is_symlink() {
+            // No se sigue el enlace: se registra a dónde apunta. Seguirlo
+            // sacaría al perito del material que le entregaron.
+            let destino = std::fs::read_link(&ruta)
+                .map(|d| d.display().to_string())
+                .unwrap_or_else(|_| "?".into());
+            elementos.push(Elemento {
+                ruta: rel,
+                tipo: "enlace".into(),
+                bytes: 0,
+                sha256: String::new(),
+                modificado_utc: modificado(&meta),
+                estado: format!("enlace -> {destino}"),
+            });
+        } else if meta.is_dir() {
+            elementos.push(Elemento {
+                ruta: rel,
+                tipo: "directorio".into(),
+                bytes: 0,
+                sha256: String::new(),
+                modificado_utc: modificado(&meta),
+                estado: "directorio".into(),
+            });
+        } else {
+            elementos.push(elemento_de_archivo(&ruta, rel, &mut ilegibles));
+        }
+    }
+
+    Ok(Recoleccion { elementos, ilegibles })
+}
+
+fn elemento_de_archivo(ruta: &Path, rel: String, ilegibles: &mut Vec<String>) -> Elemento {
+    let meta = std::fs::symlink_metadata(ruta).ok();
+    let modificado_utc = meta.as_ref().map(modificado).unwrap_or_default();
+    match hash_archivo(ruta) {
+        Ok((bytes, sha)) => Elemento {
+            ruta: rel,
+            tipo: "archivo".into(),
+            bytes,
+            sha256: sha,
+            modificado_utc,
+            estado: "leido".into(),
+        },
+        Err(err) => {
+            ilegibles.push(format!("{rel}: {err}"));
+            Elemento {
+                ruta: rel,
+                tipo: "archivo".into(),
+                bytes: meta.map(|m| m.len()).unwrap_or(0),
+                sha256: String::new(),
+                modificado_utc,
+                estado: format!("ERROR: {err}"),
+            }
+        }
+    }
+}
+
+/// Vuelve a leer el origen y compara con lo que dice el acta.
+#[derive(Debug, PartialEq)]
+pub enum Discrepancia {
+    Alterado { ruta: String, esperado: String, encontrado: String },
+    Ausente { ruta: String },
+    NoEstabaEnElActa { ruta: String },
+    NoVerificable { ruta: String, motivo: String },
+}
+
+impl std::fmt::Display for Discrepancia {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Alterado { ruta, esperado, encontrado } => write!(
+                f,
+                "ALTERADO   {ruta}\n           acta: {esperado}\n           disco: {encontrado}"
+            ),
+            Self::Ausente { ruta } => write!(f, "AUSENTE    {ruta} (está en el acta, no en el disco)"),
+            Self::NoEstabaEnElActa { ruta } => {
+                write!(f, "AÑADIDO    {ruta} (está en el disco, no en el acta)")
+            }
+            Self::NoVerificable { ruta, motivo } => write!(f, "SIN LEER   {ruta}: {motivo}"),
+        }
+    }
+}
+
+/// Contrasta el acta contra el contenido actual de `origen`.
+pub fn contrastar(elementos: &[Elemento], origen: &Path) -> Result<Vec<Discrepancia>> {
+    let actual = recolectar(origen)?;
+    let mut discrepancias = Vec::new();
+
+    for esperado in elementos {
+        match actual.elementos.iter().find(|e| e.ruta == esperado.ruta) {
+            None => discrepancias.push(Discrepancia::Ausente { ruta: esperado.ruta.clone() }),
+            Some(hallado) => {
+                if esperado.estado.starts_with("ERROR") || esperado.sha256.is_empty() {
+                    // No se puede afirmar que coincide algo que nunca se leyó.
+                    // Se dice, no se da por bueno.
+                    if esperado.tipo == "archivo" {
+                        discrepancias.push(Discrepancia::NoVerificable {
+                            ruta: esperado.ruta.clone(),
+                            motivo: format!("en el acta consta «{}»", esperado.estado),
+                        });
+                    }
+                } else if hallado.sha256 != esperado.sha256 {
+                    discrepancias.push(Discrepancia::Alterado {
+                        ruta: esperado.ruta.clone(),
+                        esperado: esperado.sha256.clone(),
+                        encontrado: if hallado.sha256.is_empty() {
+                            hallado.estado.clone()
+                        } else {
+                            hallado.sha256.clone()
+                        },
+                    });
+                }
+            }
+        }
+    }
+
+    for hallado in &actual.elementos {
+        if !elementos.iter().any(|e| e.ruta == hallado.ruta) {
+            discrepancias.push(Discrepancia::NoEstabaEnElActa { ruta: hallado.ruta.clone() });
+        }
+    }
+
+    Ok(discrepancias)
+}

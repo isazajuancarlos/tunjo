@@ -1,0 +1,10 @@
+/target/
+
+# Material de casos y sus actas: NUNCA entran al repositorio.
+*.clave
+acta*.json
+acta*.md
+/casos/
+/evidencia/
+
+conversaciones/
