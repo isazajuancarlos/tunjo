@@ -79,7 +79,8 @@ verificación se hace sobre el JSON; el Markdown es para leer.
    peritaje, la contraparte tiene derecho a verificar el correo que la incrimina,
    no a leer los otros cuatro mil de la casilla.
 3. El acta completa en JSON —incluidos método, reloj y lista de elementos— se
-   firma con la **firma triple-híbrida de [Quipu](../decod)**: Ed25519 +
+   firma con la **firma triple-híbrida de
+   [Quipu](https://github.com/isazajuancarlos/quipu)**: Ed25519 +
    ML-DSA-87 (FIPS 204) + SLH-DSA-SHA2-256s (FIPS 205), las tres a la vez, y las
    tres deben validar.
 

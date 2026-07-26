@@ -880,6 +880,8 @@ checksum = "d55d956fa96f5ec02be2e13af0e20391a5aa83d6a074e3ad368959d0fab299ea"
 [[package]]
 name = "quipu"
 version = "0.9.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "311e25668b553d5a6e90211e68f1e23739ad96cf4bb2b292dabda675c4abef77"
 dependencies = [
  "argon2",
  "chacha20poly1305",
@@ -888,12 +890,15 @@ dependencies = [
  "fips205",
  "getrandom 0.4.3",
  "hkdf",
+ "image",
  "ml-dsa",
  "ml-kem",
- "quipu-nucleo",
+ "num-bigint",
+ "num-traits",
  "quipu-voprf",
  "rand_chacha",
  "rand_core 0.10.1",
+ "reed-solomon",
  "sha2 0.11.0",
  "subtle",
  "unicode-normalization",
@@ -902,18 +907,10 @@ dependencies = [
 ]
 
 [[package]]
-name = "quipu-nucleo"
-version = "0.1.0"
-dependencies = [
- "image",
- "num-bigint",
- "num-traits",
- "reed-solomon",
-]
-
-[[package]]
 name = "quipu-voprf"
 version = "0.2.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "38ba44d3d618b0b472926c759fa62439bc280b6efd53e081134f32a899e9d15b"
 dependencies = [
  "curve25519-dalek",
  "getrandom 0.4.3",
