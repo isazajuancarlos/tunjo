@@ -62,6 +62,14 @@ tunjo acta acta.json --salida acta.md
 Códigos de salida: `0` conforme, `1` la verificación falló, `2` error de
 operación. Un guion de revisión necesita distinguirlos.
 
+Para sellar por lotes —cincuenta elementos de un caso no se hacen a mano— la
+contraseña puede darse en `TUNJO_CONTRASENA`. Es opt-in y tiene su coste: queda
+en el entorno del proceso. Sin ella, el CLI la pide por terminal.
+
+El acta legible lleva las **huellas** de la clave y de la firma, no sus valores
+completos: la firma triple ocupa 46 KB en base64 y nadie coteja eso en papel. La
+verificación se hace sobre el JSON; el Markdown es para leer.
+
 ## Cómo funciona el sello
 
 1. Se recorre el origen **en solo lectura** y se calcula SHA-256 de cada archivo.
@@ -113,8 +121,11 @@ prueba, es una afirmación.
 ## Pruebas
 
 ```bash
-cargo test
+cargo test --release   # en debug tarda decenas de minutos
 ```
+
+**Siempre en release.** Argon2id y SLH-DSA sin optimizar tardan cerca de un
+minuto por operación: la suite en modo debug no es lenta, es inviable.
 
 Incluye una simulación de 240 contrastes (se altera un byte de cada uno de 120
 archivos, se exige que señale ese y solo ese, y que al restaurarlo no queden

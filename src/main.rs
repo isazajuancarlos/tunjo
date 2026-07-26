@@ -90,7 +90,21 @@ fn leer_acta(ruta: &Path) -> Result<Acta> {
     serde_json::from_str(&texto).with_context(|| format!("el acta {} no es válida", ruta.display()))
 }
 
+/// Variable con la que se automatiza el sellado por lotes.
+///
+/// Existe porque sellar cincuenta elementos de un caso a mano no es una
+/// operación rara: es la normal. Sin esto el CLI exige un terminal y no se
+/// puede guionizar. Es opt-in explícito y tiene su coste —la contraseña queda
+/// en el entorno del proceso—, así que se dice aquí y en el README.
+const VAR_CONTRASENA: &str = "TUNJO_CONTRASENA";
+
 fn pedir_contrasena(confirmar: bool) -> Result<String> {
+    if let Ok(p) = std::env::var(VAR_CONTRASENA) {
+        if p.trim().is_empty() {
+            bail!("{VAR_CONTRASENA} está definida pero vacía");
+        }
+        return Ok(p);
+    }
     let p = rpassword::prompt_password("Contraseña de la clave del perito: ")?;
     if p.trim().is_empty() {
         bail!("una clave de firma sin contraseña no protege nada");

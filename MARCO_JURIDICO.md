@@ -189,6 +189,10 @@ datos (art. 8). La Corte Suprema lo confirmó en STC3964 de 2023.
 escasea no es el reconocimiento legal del formato, sino la prueba de su
 integridad cuando alguien la discute.
 
+**Pendiente de verificar:** la numeración (arts. 5 y 8) y la referencia a
+STC3964 de 2023 provienen de fuentes secundarias, no del texto oficial ni de la
+providencia. Contrastarlas antes de citarlas en un escrito.
+
 **Fuente:** [Ley 2213 de 2022 — Función Pública](https://www.funcionpublica.gov.co/eva/gestornormativo/norma.php?i=187626).
 
 ---

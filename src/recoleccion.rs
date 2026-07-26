@@ -204,7 +204,26 @@ pub fn contrastar(elementos: &[Elemento], origen: &Path) -> Result<Vec<Discrepan
         match actual.elementos.iter().find(|e| e.ruta == esperado.ruta) {
             None => discrepancias.push(Discrepancia::Ausente { ruta: esperado.ruta.clone() }),
             Some(hallado) => {
-                if esperado.estado.starts_with("ERROR") || esperado.sha256.is_empty() {
+                if hallado.tipo != esperado.tipo {
+                    // Un archivo donde había un enlace —o al revés— es un
+                    // cambio de estado aunque el contenido cuadre.
+                    discrepancias.push(Discrepancia::Alterado {
+                        ruta: esperado.ruta.clone(),
+                        esperado: format!("{} ({})", esperado.tipo, esperado.estado),
+                        encontrado: format!("{} ({})", hallado.tipo, hallado.estado),
+                    });
+                } else if esperado.tipo == "enlace" {
+                    // Un enlace no tiene contenido que hashear: lo que hay que
+                    // vigilar es a dónde apunta. Sin esto, reapuntarlo a otro
+                    // archivo pasaba inadvertido.
+                    if hallado.estado != esperado.estado {
+                        discrepancias.push(Discrepancia::Alterado {
+                            ruta: esperado.ruta.clone(),
+                            esperado: esperado.estado.clone(),
+                            encontrado: hallado.estado.clone(),
+                        });
+                    }
+                } else if esperado.estado.starts_with("ERROR") || esperado.sha256.is_empty() {
                     // No se puede afirmar que coincide algo que nunca se leyó.
                     // Se dice, no se da por bueno.
                     if esperado.tipo == "archivo" {

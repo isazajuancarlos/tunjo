@@ -9,6 +9,7 @@
 
 use std::fs;
 use std::path::Path;
+use std::sync::OnceLock;
 
 use quipu::pqsign::{TripleSigningKey, generate_triple_keypair};
 use tunjo::acta::{Acta, ErrorActa};
@@ -35,15 +36,22 @@ fn material(dir: &Path, n: usize) {
     }
 }
 
-fn firmante() -> TripleSigningKey {
-    generate_triple_keypair().1
+/// Clave compartida por las pruebas que no van sobre la generación de claves.
+///
+/// `generate_triple_keypair` tarda cerca de un minuto sin optimizar —SLH-DSA no
+/// es barato— y generarla en cada prueba convertía la suite en media hora de
+/// espera. La prueba de concurrencia sí genera la suya en cada hebra: ahí el
+/// objeto de la prueba es precisamente esa llamada.
+fn firmante() -> &'static TripleSigningKey {
+    static CLAVE: OnceLock<TripleSigningKey> = OnceLock::new();
+    CLAVE.get_or_init(|| generate_triple_keypair().1)
 }
 
 #[test]
 fn sellar_y_verificar_un_directorio() {
     let dir = tempfile::tempdir().unwrap();
     material(dir.path(), 10);
-    let acta = sellado::sellar(dir.path(), &firmante(), &datos()).unwrap();
+    let acta = sellado::sellar(dir.path(), firmante(), &datos()).unwrap();
 
     assert!(acta.verificar_sello().is_ok());
     assert!(recoleccion::contrastar(&acta.elementos, dir.path()).unwrap().is_empty());
@@ -56,7 +64,7 @@ fn sellar_un_archivo_suelto() {
     let dir = tempfile::tempdir().unwrap();
     let f = dir.path().join("correo.eml");
     fs::write(&f, b"From: alguien\n").unwrap();
-    let acta = sellado::sellar(&f, &firmante(), &datos()).unwrap();
+    let acta = sellado::sellar(&f, firmante(), &datos()).unwrap();
     assert_eq!(acta.elementos.len(), 1);
     assert_eq!(acta.elementos[0].ruta, "correo.eml");
     assert!(acta.verificar_sello().is_ok());
@@ -65,7 +73,7 @@ fn sellar_un_archivo_suelto() {
 #[test]
 fn un_directorio_vacio_no_se_sella() {
     let dir = tempfile::tempdir().unwrap();
-    let e = sellado::sellar(dir.path(), &firmante(), &datos()).unwrap_err();
+    let e = sellado::sellar(dir.path(), firmante(), &datos()).unwrap_err();
     assert!(e.to_string().contains("no hay nada que sellar"), "{e}");
 }
 
@@ -73,7 +81,7 @@ fn un_directorio_vacio_no_se_sella() {
 fn detecta_alteracion_de_contenido() {
     let dir = tempfile::tempdir().unwrap();
     material(dir.path(), 5);
-    let acta = sellado::sellar(dir.path(), &firmante(), &datos()).unwrap();
+    let acta = sellado::sellar(dir.path(), firmante(), &datos()).unwrap();
 
     fs::write(dir.path().join("archivo0001.txt"), "contenido alterado\n").unwrap();
     let d = recoleccion::contrastar(&acta.elementos, dir.path()).unwrap();
@@ -88,7 +96,7 @@ fn detecta_alteracion_de_contenido() {
 fn detecta_borrado_y_adicion() {
     let dir = tempfile::tempdir().unwrap();
     material(dir.path(), 4);
-    let acta = sellado::sellar(dir.path(), &firmante(), &datos()).unwrap();
+    let acta = sellado::sellar(dir.path(), firmante(), &datos()).unwrap();
 
     fs::remove_file(dir.path().join("archivo0001.txt")).unwrap();
     fs::write(dir.path().join("nuevo.txt"), "aparecido").unwrap();
@@ -105,7 +113,7 @@ fn mover_un_archivo_de_sitio_rompe_el_sello_del_conjunto() {
     // mismo contenido en otra ruta es otro estado.
     let dir = tempfile::tempdir().unwrap();
     material(dir.path(), 4);
-    let acta = sellado::sellar(dir.path(), &firmante(), &datos()).unwrap();
+    let acta = sellado::sellar(dir.path(), firmante(), &datos()).unwrap();
 
     fs::rename(dir.path().join("archivo0001.txt"), dir.path().join("sub/archivo0001.txt")).unwrap();
     let d = recoleccion::contrastar(&acta.elementos, dir.path()).unwrap();
@@ -117,7 +125,7 @@ fn el_contenido_intacto_no_produce_falsos_positivos() {
     // El reverso de las pruebas de detección: si señalara siempre, no serviría.
     let dir = tempfile::tempdir().unwrap();
     material(dir.path(), 30);
-    let acta = sellado::sellar(dir.path(), &firmante(), &datos()).unwrap();
+    let acta = sellado::sellar(dir.path(), firmante(), &datos()).unwrap();
     for _ in 0..10 {
         assert!(recoleccion::contrastar(&acta.elementos, dir.path()).unwrap().is_empty());
     }
@@ -127,7 +135,7 @@ fn el_contenido_intacto_no_produce_falsos_positivos() {
 fn manipular_el_acta_invalida_el_sello() {
     let dir = tempfile::tempdir().unwrap();
     material(dir.path(), 3);
-    let acta = sellado::sellar(dir.path(), &firmante(), &datos()).unwrap();
+    let acta = sellado::sellar(dir.path(), firmante(), &datos()).unwrap();
 
     // 1. Cambiar el hash de un elemento: la raíz deja de corresponder.
     let mut a = acta.clone();
@@ -154,7 +162,7 @@ fn manipular_el_acta_invalida_el_sello() {
 fn la_firma_de_otra_clave_no_sirve() {
     let dir = tempfile::tempdir().unwrap();
     material(dir.path(), 3);
-    let acta = sellado::sellar(dir.path(), &firmante(), &datos()).unwrap();
+    let acta = sellado::sellar(dir.path(), firmante(), &datos()).unwrap();
 
     // Sustituir la clave pública por otra: la firma deja de validar. Es el
     // ataque de sustitución de clave, y debe fallar aunque el resto cuadre.
@@ -169,7 +177,7 @@ fn la_firma_de_otra_clave_no_sirve() {
 fn el_acta_sobrevive_a_ir_y_volver_de_json() {
     let dir = tempfile::tempdir().unwrap();
     material(dir.path(), 6);
-    let acta = sellado::sellar(dir.path(), &firmante(), &datos()).unwrap();
+    let acta = sellado::sellar(dir.path(), firmante(), &datos()).unwrap();
 
     let json = serde_json::to_string_pretty(&acta).unwrap();
     let leida: Acta = serde_json::from_str(&json).unwrap();
@@ -183,7 +191,7 @@ fn el_reloj_sin_verificar_queda_escrito_como_tal() {
     material(dir.path(), 2);
     let mut d = datos();
     d.reloj = None;
-    let acta = sellado::sellar(dir.path(), &firmante(), &d).unwrap();
+    let acta = sellado::sellar(dir.path(), firmante(), &d).unwrap();
     assert!(
         acta.adquisicion.reloj.verificacion.contains("NO VERIFICADO"),
         "la ausencia del dato debe constar, no rellenarse: {}",
@@ -208,13 +216,13 @@ fn un_archivo_ilegible_detiene_el_sellado() {
         return;
     }
 
-    let e = sellado::sellar(dir.path(), &firmante(), &datos()).unwrap_err();
+    let e = sellado::sellar(dir.path(), firmante(), &datos()).unwrap_err();
     assert!(e.to_string().contains("no se pudieron leer"), "{e}");
 
     // Con la bandera explícita sí sella, y el elemento consta como ERROR.
     let mut d = datos();
     d.admitir_ilegibles = true;
-    let acta = sellado::sellar(dir.path(), &firmante(), &d).unwrap();
+    let acta = sellado::sellar(dir.path(), firmante(), &d).unwrap();
     let el = acta.elementos.iter().find(|e| e.ruta == "ilegible.bin").unwrap();
     assert!(el.estado.starts_with("ERROR"), "estado: {}", el.estado);
     assert!(el.sha256.is_empty(), "no puede haber hash de lo que no se leyó");
@@ -239,13 +247,45 @@ fn los_enlaces_simbolicos_no_se_siguen() {
     material(dir.path(), 2);
     std::os::unix::fs::symlink(fuera.path(), dir.path().join("enlace")).unwrap();
 
-    let acta = sellado::sellar(dir.path(), &firmante(), &datos()).unwrap();
+    let acta = sellado::sellar(dir.path(), firmante(), &datos()).unwrap();
     let enlace = acta.elementos.iter().find(|e| e.ruta == "enlace").unwrap();
     assert_eq!(enlace.tipo, "enlace");
     assert!(enlace.estado.starts_with("enlace ->"));
     assert!(
         !acta.elementos.iter().any(|e| e.ruta.contains("ajeno.txt")),
-        "se siguió el enlace y se sellró material ajeno"
+        "se siguió el enlace y se selló material ajeno"
+    );
+
+    // Y reapuntar el enlace se detecta: no tiene contenido que hashear, así que
+    // lo que se vigila es su destino.
+    let otro = tempfile::tempdir().unwrap();
+    fs::remove_file(dir.path().join("enlace")).unwrap();
+    std::os::unix::fs::symlink(otro.path(), dir.path().join("enlace")).unwrap();
+    let d = recoleccion::contrastar(&acta.elementos, dir.path()).unwrap();
+    assert!(
+        d.iter().any(|x| matches!(x, Discrepancia::Alterado { ruta, .. } if ruta == "enlace")),
+        "reapuntar un enlace pasó inadvertido: {d:?}"
+    );
+}
+
+#[cfg(unix)]
+#[test]
+fn cambiar_un_archivo_por_un_enlace_se_detecta() {
+    // El mismo contenido a través de un enlace no es el mismo estado.
+    let dir = tempfile::tempdir().unwrap();
+    material(dir.path(), 3);
+    let acta = sellado::sellar(dir.path(), firmante(), &datos()).unwrap();
+
+    let victima = dir.path().join("archivo0001.txt");
+    let copia = dir.path().join("sub/copia.txt");
+    fs::copy(&victima, &copia).unwrap();
+    fs::remove_file(&victima).unwrap();
+    std::os::unix::fs::symlink(&copia, &victima).unwrap();
+
+    let d = recoleccion::contrastar(&acta.elementos, dir.path()).unwrap();
+    assert!(
+        d.iter().any(|x| matches!(x, Discrepancia::Alterado { ruta, .. } if ruta == "archivo0001.txt")),
+        "un archivo sustituido por un enlace al mismo contenido pasó inadvertido: {d:?}"
     );
 }
 
@@ -259,7 +299,7 @@ fn simulacion_de_240_contrastes() {
     let dir = tempfile::tempdir().unwrap();
     const N: usize = 120;
     material(dir.path(), N);
-    let acta = sellado::sellar(dir.path(), &firmante(), &datos()).unwrap();
+    let acta = sellado::sellar(dir.path(), firmante(), &datos()).unwrap();
     assert!(recoleccion::contrastar(&acta.elementos, dir.path()).unwrap().is_empty());
 
     let mut detectados = 0;
@@ -319,7 +359,10 @@ fn sellado_concurrente_sin_interbloqueo() {
         std::thread::spawn(move || {
             let dir = tempfile::tempdir().unwrap();
             material(dir.path(), 12);
-            let acta = sellado::sellar(dir.path(), &firmante(), &datos()).unwrap();
+            // Clave propia por hebra: lo que se ejercita aquí es la generación
+            // y la firma concurrentes, no el sellado con una clave ya hecha.
+            let sk = generate_triple_keypair().1;
+            let acta = sellado::sellar(dir.path(), &sk, &datos()).unwrap();
             let ok = acta.verificar_sello().is_ok()
                 && recoleccion::contrastar(&acta.elementos, dir.path()).unwrap().is_empty();
             tx.send((h, ok)).unwrap();

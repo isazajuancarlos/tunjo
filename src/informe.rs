@@ -7,10 +7,30 @@
 //! edita el Markdown, el sello sigue estando sobre el JSON y la diferencia se
 //! nota.
 
-use crate::acta::Acta;
+use base64::{Engine, engine::general_purpose::STANDARD};
+use sha2::{Digest, Sha256};
+
+use crate::acta::{Acta, hex};
 
 fn escapar(s: &str) -> String {
     s.replace('|', "\\|").replace('\n', " ")
+}
+
+/// Huella legible de un valor en base64.
+///
+/// La clave pública triple ocupa 3,5 KB en base64 y la firma ronda los 46 KB:
+/// impresos ocupan cientos de páginas y nadie los coteja a ojo. En el documento
+/// va la huella —que sí se compara de un vistazo— y el valor íntegro queda en el
+/// JSON, que es lo que verifica la máquina. El acta lo dice expresamente para
+/// que nadie crea que el papel basta para verificar.
+fn huella(b64: &str) -> String {
+    let bytes = match STANDARD.decode(b64) {
+        Ok(b) => b,
+        Err(_) => return "(valor ilegible)".into(),
+    };
+    let h = hex(&Sha256::digest(&bytes));
+    let grupos: Vec<String> = h.as_bytes().chunks(8).map(|c| String::from_utf8_lossy(c).into_owned()).collect();
+    format!("{} ({} bytes)", grupos.join(" "), bytes.len())
 }
 
 pub fn markdown(acta: &Acta) -> String {
@@ -26,7 +46,10 @@ pub fn markdown(acta: &Acta) -> String {
     m.push_str("## 1. Perito\n\n");
     m.push_str(&format!("- **Nombre:** {}\n", acta.perito.nombre));
     m.push_str(&format!("- **Identificación:** {}\n", acta.perito.identificacion));
-    m.push_str(&format!("- **Clave pública de verificación (base64):**\n\n```\n{}\n```\n\n", acta.perito.clave_publica));
+    m.push_str(&format!(
+        "- **Clave pública de verificación** — huella SHA-256:\n\n```\n{}\n```\n\n",
+        huella(&acta.perito.clave_publica)
+    ));
 
     m.push_str("## 2. Método de adquisición\n\n");
     m.push_str(&format!("- **Origen:** `{}`\n", acta.adquisicion.origen));
@@ -73,7 +96,12 @@ pub fn markdown(acta: &Acta) -> String {
             m.push_str(&format!("- **Algoritmo:** {}\n", f.algoritmo));
             m.push_str("- **Cobertura:** la totalidad del acta en formato JSON, incluidos el\n");
             m.push_str("  listado de elementos y la raíz.\n\n");
-            m.push_str(&format!("```\n{}\n```\n\n", f.valor));
+            m.push_str("Huella SHA-256 de la firma:\n\n");
+            m.push_str(&format!("```\n{}\n```\n\n", huella(&f.valor)));
+            m.push_str("> La firma y la clave completas están en el archivo JSON, no en este\n");
+            m.push_str("> documento: impresas ocuparían cientos de páginas que nadie cotejaría.\n");
+            m.push_str("> **La verificación se hace sobre el JSON**; este documento es para leer,\n");
+            m.push_str("> no para verificar.\n\n");
         }
         None => m.push_str("**ACTA SIN FIRMAR.** No acredita nada mientras no se selle.\n\n"),
     }
