@@ -93,6 +93,26 @@ pub struct Firma {
     pub valor: String,
 }
 
+/// Sello de tiempo de un tercero sobre la firma del acta.
+///
+/// Va aparte de la firma porque se obtiene DESPUÉS de firmar: acredita que esa
+/// firma —y con ella todo lo que cubre— ya existía en la fecha que certifica la
+/// autoridad. Ver `crate::sello_tiempo`.
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
+pub struct SelloTiempo {
+    /// Autoridad a la que se pidió, tal como la indicó el perito.
+    pub autoridad: String,
+    /// Instante certificado por la autoridad, en UTC.
+    pub fecha_utc: String,
+    /// Política de sellado bajo la que se emitió.
+    pub politica: String,
+    /// Número de serie del token para esa autoridad.
+    pub serie: String,
+    /// El token RFC 3161 completo, en base64 y sin tocar. Es lo que permite a
+    /// un tercero validarlo con `openssl ts -verify` sin depender de nosotros.
+    pub token: String,
+}
+
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
 pub struct Acta {
     pub formato: String,
@@ -104,6 +124,10 @@ pub struct Acta {
     pub raiz_merkle: String,
     /// `None` mientras el acta no se ha firmado.
     pub firma: Option<Firma>,
+    /// `None` si no se pidió sello de tiempo. Su ausencia NO es un defecto del
+    /// acta: es un límite, y el informe lo declara como tal.
+    #[serde(default)]
+    pub sello_tiempo: Option<SelloTiempo>,
 }
 
 /// Errores del acta. Cada uno existe porque hay una forma concreta de que un
@@ -117,6 +141,8 @@ pub enum ErrorActa {
     ClaveMalFormada,
     RaizNoCoincide { declarada: String, calculada: String },
     FirmaInvalida,
+    SelloMalFormado,
+    SelloNoCorresponde(String),
 }
 
 impl std::fmt::Display for ErrorActa {
@@ -132,6 +158,8 @@ impl std::fmt::Display for ErrorActa {
                 "la raíz de Merkle declarada ({declarada}) no corresponde a los elementos del acta ({calculada})"
             ),
             Self::FirmaInvalida => write!(f, "la firma NO verifica contra la clave pública del acta"),
+            Self::SelloMalFormado => write!(f, "el sello de tiempo no es base64 válido"),
+            Self::SelloNoCorresponde(m) => write!(f, "{m}"),
         }
     }
 }
@@ -143,16 +171,43 @@ pub fn hex(bytes: &[u8]) -> String {
 }
 
 impl Acta {
-    /// Bytes que se firman: el acta completa **sin** el campo `firma`.
+    /// Bytes que se firman: el acta completa **sin** la firma ni el sello.
+    ///
+    /// El sello queda fuera por necesidad, no por comodidad: se pide sobre el
+    /// hash de la firma, así que no puede existir antes de firmar. Incluirlo
+    /// haría el acta imposible de firmar y de verificar.
     ///
     /// Determinista porque `serde_json` respeta el orden de declaración de los
     /// campos de una `struct` y aquí no hay ningún mapa desordenado. Esa
     /// propiedad es la que permite verificar el acta dentro de diez años, así
     /// que está cubierta por una prueba.
     pub fn bytes_canonicos(&self) -> Vec<u8> {
-        let mut sin_firma = self.clone();
-        sin_firma.firma = None;
-        serde_json::to_vec(&sin_firma).expect("el acta siempre serializa")
+        let mut desnuda = self.clone();
+        desnuda.firma = None;
+        desnuda.sello_tiempo = None;
+        serde_json::to_vec(&desnuda).expect("el acta siempre serializa")
+    }
+
+    /// Comprueba el sello de tiempo, si lo hay.
+    ///
+    /// `Ok(None)` significa que el acta no lleva sello — que es un límite
+    /// declarado, no un error. `Err` significa que lleva uno que no cuadra, y
+    /// eso sí es grave: un sello que no corresponde a esta firma no acredita
+    /// nada sobre esta acta.
+    pub fn verificar_sello_tiempo(&self) -> Result<Option<crate::sello_tiempo::DatosSello>, ErrorActa> {
+        use base64::{Engine, engine::general_purpose::STANDARD};
+
+        let Some(sello) = &self.sello_tiempo else {
+            return Ok(None);
+        };
+        let firma = self.firma.as_ref().ok_or(ErrorActa::SinFirma)?;
+        let firma_bytes = STANDARD.decode(&firma.valor).map_err(|_| ErrorActa::FirmaMalFormada)?;
+        let token = STANDARD.decode(&sello.token).map_err(|_| ErrorActa::SelloMalFormado)?;
+
+        let hash = crate::sello_tiempo::hash_de(&firma_bytes);
+        crate::sello_tiempo::verificar(&token, &hash)
+            .map(Some)
+            .map_err(|e| ErrorActa::SelloNoCorresponde(e.to_string()))
     }
 
     /// Raíz de Merkle calculada a partir de los elementos presentes.
@@ -243,6 +298,7 @@ mod pruebas {
             }],
             raiz_merkle: String::new(),
             firma: None,
+            sello_tiempo: None,
         }
     }
 

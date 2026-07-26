@@ -65,6 +65,10 @@ enum Orden {
         /// archivo que no se pudo leer detiene el sellado.
         #[arg(long)]
         admitir_ilegibles: bool,
+        /// URL de una autoridad de sellado de tiempo RFC 3161. Sin esto el acta
+        /// prueba orden relativo, no fecha cierta oponible a terceros.
+        #[arg(long, value_name = "URL")]
+        sello: Option<String>,
         #[arg(long, default_value = "acta.json")]
         salida: PathBuf,
     },
@@ -142,6 +146,7 @@ fn orden_sellar(
     metodo: String,
     reloj: Option<String>,
     admitir_ilegibles: bool,
+    autoridad_sello: Option<String>,
     salida: PathBuf,
 ) -> Result<()> {
     if salida.exists() {
@@ -163,6 +168,7 @@ fn orden_sellar(
             metodo,
             reloj,
             admitir_ilegibles,
+            autoridad_sello,
         },
     )?;
 
@@ -176,6 +182,10 @@ fn orden_sellar(
         println!("  ILEGIBLES:  {ilegibles} (constan en el acta)");
     }
     println!("  raíz:       {}", acta.raiz_merkle);
+    match &acta.sello_tiempo {
+        Some(s) => println!("  sello:      {} — {}", s.fecha_utc, s.autoridad),
+        None => println!("  sello:      SIN SELLO DE TIEMPO (prueba orden relativo, no fecha cierta)"),
+    }
     Ok(())
 }
 
@@ -198,6 +208,24 @@ fn orden_verificar(ruta: PathBuf, origen: Option<PathBuf>) -> Result<bool> {
         }
         Err(e) => {
             println!("SELLO INVÁLIDO: {e}");
+            return Ok(false);
+        }
+    }
+
+    // El sello de tiempo se verifica aparte y su ausencia NO invalida el acta:
+    // es un límite declarado, no un defecto. Lo que sí invalida es llevar uno
+    // que sella otra cosa.
+    match acta.verificar_sello_tiempo() {
+        Ok(Some(t)) => {
+            println!("  fecha cierta: {} (autoridad RFC 3161)", t.fecha_utc);
+            println!("  política:     {}", t.politica);
+        }
+        Ok(None) => println!(
+            "  fecha cierta: NO — el acta no lleva sello de tiempo de un tercero,\n\
+             \x20               así que prueba orden relativo, no fecha oponible"
+        ),
+        Err(e) => {
+            println!("SELLO DE TIEMPO INVÁLIDO: {e}");
             return Ok(false);
         }
     }
@@ -252,6 +280,7 @@ fn main() -> ExitCode {
             metodo,
             reloj,
             admitir_ilegibles,
+            sello,
             salida,
         } => orden_sellar(
             origen,
@@ -263,6 +292,7 @@ fn main() -> ExitCode {
             metodo,
             reloj,
             admitir_ilegibles,
+            sello,
             salida,
         )
         .map(|_| true),

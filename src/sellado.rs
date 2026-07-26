@@ -8,7 +8,7 @@
 
 use std::path::Path;
 
-use anyhow::{Result, bail};
+use anyhow::{Context, Result, bail};
 use base64::{Engine, engine::general_purpose::STANDARD};
 use chrono::{Local, SecondsFormat, Utc};
 use quipu::pqsign::TripleSigningKey;
@@ -28,6 +28,9 @@ pub struct Datos {
     pub reloj: Option<String>,
     /// Permite sellar con elementos ilegibles, dejando constancia de cada uno.
     pub admitir_ilegibles: bool,
+    /// URL de la autoridad de sellado RFC 3161. `None` = sin sello de tiempo,
+    /// y entonces el acta prueba orden relativo pero no fecha cierta.
+    pub autoridad_sello: Option<String>,
 }
 
 /// Recolecta, arma el acta, la firma y **comprueba el sello recién puesto**.
@@ -78,6 +81,7 @@ pub fn sellar(origen: &Path, sk: &TripleSigningKey, datos: &Datos) -> Result<Act
         elementos: recogido.elementos,
         raiz_merkle: String::new(),
         firma: None,
+        sello_tiempo: None,
     };
 
     acta.fijar_raiz()?;
@@ -87,8 +91,36 @@ pub fn sellar(origen: &Path, sk: &TripleSigningKey, datos: &Datos) -> Result<Act
         valor: STANDARD.encode(&firma),
     });
 
+    // Sello de tiempo, si se pidió. Va DESPUÉS de firmar porque sella la firma.
+    //
+    // Si el perito lo pidió y la autoridad no responde, esto FALLA. No se cae a
+    // un acta sin sello: quien pidió fecha cierta y recibe un acta sin ella no
+    // tiene cómo notarlo hasta que alguien la discuta.
+    if let Some(url) = &datos.autoridad_sello {
+        let firma_bytes = STANDARD.decode(&acta.firma.as_ref().expect("recién firmada").valor)
+            .expect("lo que acabamos de codificar");
+        let hash = crate::sello_tiempo::hash_de(&firma_bytes);
+
+        let mut nonce = [0u8; 16];
+        getrandom::fill(&mut nonce).context("no hay aleatoriedad del sistema para el nonce")?;
+
+        let token = crate::sello_tiempo::solicitar(&hash, url, &nonce)
+            .with_context(|| format!("no se pudo obtener el sello de tiempo de {url}"))?;
+        let datos_sello = crate::sello_tiempo::verificar(&token, &hash)
+            .context("la autoridad devolvió un sello que no corresponde a esta firma")?;
+
+        acta.sello_tiempo = Some(crate::acta::SelloTiempo {
+            autoridad: url.clone(),
+            fecha_utc: datos_sello.fecha_utc,
+            politica: datos_sello.politica,
+            serie: datos_sello.serie,
+            token: STANDARD.encode(&token),
+        });
+    }
+
     // Comprobar el sello ANTES de entregarlo. Un acta que no se verifica a sí
     // misma no debe salir de aquí: el sitio donde se descubriría es la audiencia.
     acta.verificar_sello()?;
+    acta.verificar_sello_tiempo()?;
     Ok(acta)
 }

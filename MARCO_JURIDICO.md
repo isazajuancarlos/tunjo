@@ -328,9 +328,12 @@ no fecha oponible a terceros: un perito con el reloj adelantado produce un acta
 con fecha adelantada, y el sello no lo delata.
 
 Por eso el acta obliga a declarar cómo se contrastó el reloj, y si no se declara
-**escribe que no se verificó** en lugar de callarlo. El paso siguiente —previsto,
-no implementado— es el sello de tiempo de un tercero (RFC 3161) o el anclaje del
-hash en un medio público, que sí da fecha cierta.
+**escribe que no se verificó** en lugar de callarlo.
+
+**Implementado desde el 2026-07-26:** con `--sello URL`, una autoridad RFC 3161
+certifica que la firma del acta ya existía en un instante dado, y el acta lo
+declara en su numeral 6. Sin esa opción, el acta sigue probando orden relativo y
+lo dice.
 
 ### 5.1 En Colombia eso tiene régimen propio, y encaja
 

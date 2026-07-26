@@ -34,5 +34,16 @@ walkdir = "2"
 anyhow = "1"
 rpassword = "7"
 
+# Sello de tiempo RFC 3161. `cms` fija `der` 0.7 y `const-oid` 0.9: se pinean
+# para no acabar con dos versiones incompatibles del mismo ASN.1 y tipos que no
+# se hablan entre sí.
+cms = "0.2"
+der = { version = "0.7", features = ["oid", "std"] }
+const-oid = "0.9"
+ureq = "3"
+# El nonce del sello viene del RNG del sistema: es lo que impide que una
+# autoridad reutilice un token viejo como si fuera nuevo.
+getrandom = { version = "0.4", features = ["std"] }
+
 [dev-dependencies]
 tempfile = "3"

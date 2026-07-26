@@ -106,12 +106,48 @@ pub fn markdown(acta: &Acta) -> String {
         None => m.push_str("**ACTA SIN FIRMAR.** No acredita nada mientras no se selle.\n\n"),
     }
 
-    m.push_str("## 6. Cómo verificar esta acta\n\n");
+    m.push_str("## 6. Fecha cierta\n\n");
+    match &acta.sello_tiempo {
+        Some(t) => {
+            m.push_str(&format!(
+                "Una autoridad de sellado independiente certificó que la firma de esta \n\
+                 acta ya existía el **{}**.\n\n",
+                t.fecha_utc
+            ));
+            m.push_str(&format!("- **Autoridad:** {}\n", escapar(&t.autoridad)));
+            m.push_str(&format!("- **Política de sellado:** {}\n", t.politica));
+            m.push_str(&format!("- **Número de serie:** {}\n", t.serie));
+            m.push_str("- **Protocolo:** RFC 3161, el mismo documento normativo con el que\n");
+            m.push_str("  ONAC acredita el servicio de estampado cronológico en Colombia\n");
+            m.push_str("  (criterio CEA-3.0-07; art. 161.5 del Decreto Ley 019 de 2012).\n\n");
+            m.push_str("Huella SHA-256 del token:\n\n");
+            m.push_str(&format!("```\n{}\n```\n\n", huella(&t.token)));
+            m.push_str("> **Alcance de esta comprobación.** Esta herramienta verificó que el\n");
+            m.push_str("> sello corresponde exactamente a la firma de esta acta. **No validó\n");
+            m.push_str("> la firma de la autoridad contra su cadena de certificados**, que es\n");
+            m.push_str("> una comprobación distinta y se hace con la herramienta estándar:\n");
+            m.push_str(">\n");
+            m.push_str("> ```bash\n");
+            m.push_str("> openssl ts -verify -in sello.tsr -token_in -data firma.bin \\\n");
+            m.push_str(">     -CAfile cadena_de_la_autoridad.pem\n");
+            m.push_str("> ```\n");
+            m.push_str(">\n");
+            m.push_str("> El token completo está en el JSON para que cualquiera pueda hacerlo.\n\n");
+        }
+        None => {
+            m.push_str("**Esta acta NO lleva sello de tiempo de un tercero.**\n\n");
+            m.push_str("En consecuencia acredita **orden relativo**, no fecha cierta oponible:\n");
+            m.push_str("la hora que consta es la del reloj de la máquina del perito. Para fecha\n");
+            m.push_str("oponible hace falta el sello de una autoridad de estampado cronológico.\n\n");
+        }
+    }
+
+    m.push_str("## 7. Cómo verificar esta acta\n\n");
     m.push_str("Cualquier tercero puede comprobarla sin intervención del perito y sin\n");
     m.push_str("software propietario: el verificador es libre y su código es público.\n\n");
     m.push_str("```bash\ntunjo verificar acta.json                 # firma y coherencia interna\ntunjo verificar acta.json --origen RUTA   # además, contra el material en disco\n```\n\n");
 
-    m.push_str("## 7. Alcance y límites\n\n");
+    m.push_str("## 8. Alcance y límites\n\n");
     m.push_str("Se deja constancia expresa de lo que esta acta **no** dice:\n\n");
     m.push_str("1. Acredita que los elementos listados tenían exactamente ese contenido en\n");
     m.push_str("   el momento de la adquisición, y que no han cambiado desde entonces.\n");
@@ -119,11 +155,17 @@ pub fn markdown(acta: &Acta) -> String {
     m.push_str("   perito, ni quién lo creó, ni si fue alterado con anterioridad.\n");
     m.push_str("3. **No** contiene conclusión alguna sobre intrusiones, autoría o\n");
     m.push_str("   responsabilidad. Eso corresponde al dictamen, no a la herramienta.\n");
-    m.push_str("4. La fecha registrada es la del reloj de la máquina, contrastada según se\n");
-    m.push_str("   indica en el numeral 2. Sin sello de tiempo de tercero, prueba orden\n");
-    m.push_str("   relativo, no fecha cierta oponible.\n\n");
+    if acta.sello_tiempo.is_some() {
+        m.push_str("4. La fecha de adquisición es la del reloj de la máquina. Lo que una\n");
+        m.push_str("   autoridad independiente certifica (numeral 6) es que la firma ya\n");
+        m.push_str("   existía en ese instante — no que la adquisición ocurriera entonces.\n\n");
+    } else {
+        m.push_str("4. La fecha registrada es la del reloj de la máquina, contrastada según se\n");
+        m.push_str("   indica en el numeral 2. Sin sello de tiempo de tercero, prueba orden\n");
+        m.push_str("   relativo, no fecha cierta oponible.\n\n");
+    }
 
-    m.push_str("## 8. Fundamento normativo\n\n");
+    m.push_str("## 9. Fundamento normativo\n\n");
     m.push_str("- **Ley 527 de 1999, arts. 8 a 11.** Un mensaje de datos es íntegro si ha\n");
     m.push_str("  permanecido completo e inalterado; su fuerza probatoria se valora según\n");
     m.push_str("  la confiabilidad de la forma en que se generó, archivó o comunicó, la\n");

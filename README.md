@@ -44,8 +44,10 @@ penal—. Ver `MARCO_JURIDICO.md` §6.1.
   línea por línea, y con ella se cae el resto.
 - **No prueba el pasado.** Acredita desde el instante de la adquisición. Si el
   material ya venía alterado, el sello certifica fielmente material alterado.
-- **No da fecha cierta** por sí solo: prueba orden relativo. Para fecha oponible
-  hace falta sello de tiempo de un tercero.
+- **No valida la firma de la autoridad de sellado** contra su cadena de
+  certificados. Verifica que el sello corresponde a la firma del acta, guarda el
+  token íntegro, y remite a `openssl ts -verify` para lo demás. Está medido: hay
+  una prueba que fija ese límite y falla si algún día deja de ser cierto.
 - **No escribe nunca dentro del origen.** Solo lee.
 
 ## Uso
@@ -63,6 +65,7 @@ tunjo sellar /media/evidencia/caso-01 \
   --identificacion "CC 1.234.567 — T.P. 000.000" \
   --metodo "copia lógica con bloqueador de escritura Tableau T8u" \
   --reloj "contrastado con reloj patrón de la SIC, desfase 0 s" \
+  --sello http://timestamp.digicert.com \
   --salida acta.json
 
 # 3. Verificar. Cualquiera, sin intervención del perito.
@@ -83,6 +86,23 @@ en el entorno del proceso. Sin ella, el CLI la pide por terminal.
 El acta legible lleva las **huellas** de la clave y de la firma, no sus valores
 completos: la firma triple ocupa 46 KB en base64 y nadie coteja eso en papel. La
 verificación se hace sobre el JSON; el Markdown es para leer.
+
+## Fecha cierta: `--sello`
+
+Sin sello de tiempo, un acta prueba **orden relativo**: la hora la pone el reloj
+del perito, y un reloj adelantado produce un acta adelantada sin que nada lo
+delate. Con `--sello URL`, una autoridad RFC 3161 certifica que la firma ya
+existía en un instante dado.
+
+En Colombia esto no es un servicio informal: el art. 161.5 del Decreto Ley 019
+de 2012 lista el «estampado cronológico» entre las actividades de las entidades
+de certificación digital, y **ONAC lo acredita citando RFC 3161 como su documento
+normativo** (criterio CEA-3.0-07). El protocolo técnicamente correcto y el
+jurídicamente reconocido son el mismo.
+
+Se sella la **firma**, no el acta: así queda probado que la firma —y con ella
+todo lo que cubre— ya existía. Si se pide sello y la autoridad no responde, el
+sellado **falla**; no se cae en silencio a un acta sin fecha cierta.
 
 ## Cómo funciona el sello
 

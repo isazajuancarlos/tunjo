@@ -18,6 +18,7 @@ pub mod informe;
 pub mod merkle;
 pub mod recoleccion;
 pub mod sellado;
+pub mod sello_tiempo;
 
 pub const VERSION: &str = env!("CARGO_PKG_VERSION");
 

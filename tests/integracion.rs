@@ -25,6 +25,9 @@ fn datos() -> Datos {
         metodo: "copia lógica en solo lectura".into(),
         reloj: Some("contrastado con reloj patrón".into()),
         admitir_ilegibles: false,
+        // Sin sello de tiempo: pedirlo aquí ataría la suite a una autoridad
+        // externa y a la red. Su banco propio está en tests/sello_tiempo.rs.
+        autoridad_sello: None,
     }
 }
 
