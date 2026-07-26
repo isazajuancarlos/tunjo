@@ -21,6 +21,19 @@ antes: cuando la contraparte pregunta *cómo sabemos que esos archivos son los
 que el perito recibió y no los que editó después*. Todo lo que sigue gira
 alrededor de eso.
 
+> **Pero esa pregunta no siempre es legítima, y conviene saberlo antes de
+> ofrecer una respuesta.** La ley presume la autenticidad de los documentos que
+> se aportan a un proceso, y la Corte Suprema anuló en **STC3964-2023** un
+> rechazo de demanda fundado precisamente en exigirle a un litigante la
+> «trazabilidad» de un poder enviado por correo: es una formalidad innecesaria de
+> las que el artículo 11 del CGP prohíbe. Aportar prueba criptográfica donde la
+> ley no la pide no refuerza un dictamen —sugiere que la presunción no bastaba— y
+> empuja al juez a exigir lo que tiene vedado exigir.
+>
+> El sello sirve donde la presunción **no alcanza**: documento tachado o
+> desconocido, discusión sobre **integridad** y no sobre autoría, masa de datos
+> que nadie aportó como propia, y materia penal. El detalle, en §6.1.
+
 La Ley 527 de 1999 dice, en su artículo 11, qué debe valorar el juez ante un
 mensaje de datos:
 
@@ -166,9 +179,21 @@ traslado—, y para un disco o un buzón esas categorías hay que traducirlas. L
 traducción no está en la norma; la pone el perito, y por eso tiene que poder
 justificarla.
 
-**Pendiente de verificar:** el texto íntegro del manual anexo a la Resolución
-2369 (no solo la resolución que lo adopta), para mapear campo a campo su formato
-de rótulo contra los del acta.
+Leído el índice del *Manual de Procedimientos para Cadena de Custodia* de la
+Fiscalía, el hallazgo se confirma y se puede precisar. Sus **trece
+procedimientos** (FGN-CC-\*) van del manejo del lugar de los hechos al envío al
+almacén de evidencias, la recepción en el laboratorio y la disposición final. Y
+cuando el manual distingue categorías, las distingue **por el origen** del
+elemento —asistencia judicial con el extranjero, agente encubierto, entrega
+vigilada, entidades prestadoras de servicios de salud—, **nunca por su
+naturaleza**. No hay procedimiento de evidencia digital: no está omitido por
+descuido, es que el sistema entero está pensado sobre el objeto que se embala.
+
+**Pendiente de verificar:** el ejemplar consultado es un manual de la Fiscalía,
+pero no pude confirmar que sea exactamente el anexo a la Resolución 2369 de 2016
+—el archivo procede del repositorio de la Rama Judicial y sus metadatos son de
+2011—. Antes de citar numerales concretos en un dictamen hay que trabajar sobre
+el ejemplar vigente.
 
 **Fuentes:** [CPP art. 254](https://leyes.co/codigo_de_procedimiento_penal/254.htm),
 [art. 255](https://leyes.co/codigo_de_procedimiento_penal/255.htm),
@@ -276,9 +301,62 @@ con la sola antefirma»— y el **artículo 8** el de las notificaciones persona
 por mensaje de datos, que se entienden surtidas transcurridos dos días hábiles
 desde el envío.
 
-**Pendiente de verificar:** la referencia a **STC3964 de 2023** viene de fuente
-secundaria; no he leído la providencia. No citarla en un escrito sin contrastar
-radicado y contenido.
+### 6.1 STC3964-2023: leída, y corrige el encuadre de este proyecto
+
+Corte Suprema de Justicia, **Sala de Casación Civil y Agraria**, **STC3964-2023**,
+radicación **50001-22-13-000-2023-00022-01**, M.P. **Aroldo Wilson Quiroz
+Monsalvo**, **26 de abril de 2023**. Verificada en su texto.
+
+**Los hechos son exactamente nuestro problema.** Un litigante aportó un poder en
+PDF conferido por correo. El juzgado lo inadmitió y luego rechazó la demanda
+porque no se acreditó la «**trazabilidad**» de haberlo obtenido por mensaje de
+datos. El actor aportó un archivo `.EML` para probar el envío, y después un
+pantallazo del correo. No bastaron.
+
+**Y la Corte le dio la razón al litigante, no al juzgado.** El poder por mensaje
+de datos se presume auténtico (art. 5 de la Ley 2213), de modo que exigir prueba
+de trazabilidad es una **formalidad innecesaria** de las que el artículo 11 del
+CGP prohíbe: requerir «cadenas de correos electrónicos que permitan establecer
+una autoría o trazabilidad **que se presume por mandato legal**». El juzgado
+incurrió en defecto adjetivo y se dejó sin efecto su auto.
+
+> **Corrección al encuadre de §1, y es importante.** La presunción de
+> autenticidad es fuerte y opera sola. Vender el sello como si toda prueba
+> digital necesitara respaldo criptográfico sería **jurídicamente equivocado** —y
+> además invitaría al juez a exigir lo que esta sentencia le prohíbe exigir—.
+>
+> Donde el sello sirve es donde la presunción **no alcanza**:
+>
+>   1. Cuando el documento es **tachado de falso o desconocido** (art. 244 CGP):
+>      ahí la presunción cae y hay que probar.
+>   2. Cuando la discusión no es de **autoría** sino de **integridad**: qué decía
+>      el archivo entonces, y si cambió después. La presunción resuelve quién lo
+>      hizo, no si fue alterado.
+>   3. Cuando no hay un documento aportado por una parte sino una **masa de
+>      datos** —un disco, un buzón, un servidor— que nadie ha presentado como
+>      suyo y sobre la que no pesa presunción alguna.
+>   4. En **materia penal**, donde no rige esta presunción sino la cadena de
+>      custodia de los artículos 254 a 257.
+>
+> Fuera de esos casos, lo correcto es invocar la presunción y no ofrecer prueba
+> adicional. Un perito que aporta lo que la ley no exige no refuerza su dictamen:
+> sugiere que la presunción no le bastaba.
+
+**Y un segundo hallazgo, que amplía el alcance en vez de estrecharlo.** La Corte
+reitera que «mensaje de datos» es mucho más amplio que «mensaje de correo
+electrónico»: comprende, por el literal a) del art. 2 de la Ley 527, la
+información *generada, enviada, recibida, **almacenada** o comunicada*. En sus
+palabras, «no es solamente el que se envía a un destinatario o que circula por
+medio de las TIC sino **cualquier dato, declaración o información que repose en
+un continente tecnológico**», sea que circule o no.
+
+**Consecuencia:** un archivo en reposo en un disco es, para el derecho
+colombiano, un mensaje de datos — con todo el régimen de la Ley 527 aplicable,
+incluida la regla de integridad del art. 9 y los criterios de valoración del art.
+11. El alcance deliberado de esta herramienta (datos en reposo) no es un recorte
+técnico: coincide con el concepto legal.
+
+**Fuente:** [STC3964-2023, texto de la providencia (PDF, Universidad Externado)](https://procesal.uexternado.edu.co/wp-content/uploads/sites/9/2023/06/sentencia-de-corte-suprema-de-justicia-sala-de-casacin-civi_es.pdf).
 
 **Fuente:** [Ley 2213 de 2022 — Función Pública](https://www.funcionpublica.gov.co/eva/gestornormativo/norma.php?i=187626).
 

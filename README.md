@@ -23,6 +23,20 @@ datos: la confiabilidad de cómo se generó, archivó o comunicó; **cómo se
 conservó su integridad**; y cómo se identifica a su iniciador. Los tres extremos
 son documentales. Tunjo los documenta.
 
+## Cuándo NO hace falta
+
+Vale la pena decirlo aquí y no en la letra pequeña: en Colombia los documentos
+aportados a un proceso **se presumen auténticos**, y la Corte Suprema anuló en
+STC3964-2023 un rechazo de demanda fundado en exigirle a un litigante la
+«trazabilidad» de un poder enviado por correo — es una formalidad innecesaria de
+las que el artículo 11 del CGP prohíbe.
+
+Aportar prueba criptográfica donde la ley no la pide no refuerza nada: sugiere
+que la presunción no bastaba. Esto sirve donde la presunción **no alcanza** —un
+documento tachado o desconocido, una discusión sobre integridad y no sobre
+autoría, una masa de datos que nadie aportó como propia, o la cadena de custodia
+penal—. Ver `MARCO_JURIDICO.md` §6.1.
+
 ## Qué NO hace, y es deliberado
 
 - **No concluye.** Ni intrusión, ni autoría, ni responsabilidad. Un detector
