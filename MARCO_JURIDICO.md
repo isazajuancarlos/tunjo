@@ -165,12 +165,60 @@ representación sea fiel y esté documentada, que es justo lo que un sello acred
 Quien embala responde. En digital, «embalar y rotular» es precisamente calcular
 la huella y levantar el acta.
 
-### 3.4 El manual de la Fiscalía
+### 3.4 El manual vigente NO es el de la Fiscalía de 2016
 
-El vigente se adoptó por **Resolución 2369 de 2016** de la Fiscalía General de la
-Nación, rige desde el **1 de agosto de 2016** en todo el territorio y —art. 2—
-obliga a «cada servidor público y particular que tenga relación con elementos
-materiales probatorios y evidencia física». Derogó la Resolución 0-1874 de 2016.
+Conviene decirlo así de directo porque es un error fácil, y esta sección lo
+contenía: la Resolución 0-2369 de 2016 **está derogada**.
+
+El instrumento vigente es el **Manual del Sistema de Cadena de Custodia**,
+adoptado por el **Acuerdo 001 del 18 de abril de 2018 del Consejo Nacional de
+Policía Judicial** —órgano que integran, y que firman, el Fiscal General, el
+Procurador General, el Contralor General, el Director de la Policía Nacional y el
+Director del Instituto Nacional de Medicina Legal—. Su artículo 15 dispone que
+rige **dos meses después** de expedido y que desde esa fecha «se entenderán
+derogados el Manual Único de Policía Judicial aprobado mediante acta No. 053 del
+13 de mayo de 2005 [y] el Manual de Procedimientos para Cadena de Custodia
+adoptado mediante Resolución No. 0-2369 de 2016».
+
+No es un cambio de rótulo: cambia el emisor —de la Fiscalía sola a los cinco
+organismos con funciones de policía judicial— y su artículo 3 lo declara de
+aplicación nacional y «carácter vinculante y obligatorio». El artículo 6 confirma
+que las reglas obligan a «cada servidor público **y particular** que tenga
+relación con EMP y EF».
+
+Tres novedades del Acuerdo importan aquí:
+
+- **Denominación** (art. 6.a): el manual «modifica el término *procedimientos*
+  por *sistema*». Citar «Manual de Procedimientos» delata que se está citando la
+  versión vieja.
+- **Capacidad demostrativa** (art. 6.b): es el enfoque que guía esta versión, y
+  conforme a él «el objetivo último de la cadena de custodia va **más allá de la
+  autenticidad** de los EMP y EF». Es exactamente la distinción que sostiene este
+  proyecto: acreditar que algo es auténtico y acreditar que puede *demostrar* algo
+  no son la misma operación.
+- **ID o código del EMP** (art. 6.e): los formatos incorporan una casilla de
+  identificador. En digital, ese identificador estable puede ser la huella
+  criptográfica del contenido, que además no depende de quién rotule.
+
+El manual adoptado consta de **once apartados** (art. 7), entre ellos «Aspectos
+transversales al Sistema de Cadena de Custodia», «Procedimientos del Sistema» y
+«Formatos».
+
+**Pendiente de verificar, y es lo que falta para cerrar del todo:** tengo el
+**acto que adopta** el manual, no el texto de sus once apartados. Sin él no puedo
+afirmar si la versión de 2018 trata la evidencia digital ni si incorpora el hash
+—hay fuentes secundarias que lo sostienen y no las he podido comprobar—. La
+observación de que el sistema está construido sobre el objeto físico se apoya en
+la edición anterior, cuyo índice sí leí; para la vigente, es una hipótesis.
+
+**Nota de procedencia, por coherencia con lo que este proyecto predica:** la copia
+del Acuerdo se descargó de `medicinalegal.gov.co`, cuya cadena TLS no validó en
+la consulta; hubo que desactivar la verificación del certificado. El documento es
+internamente consistente y aparece firmado, pero **una copia obtenida por un canal
+que no se pudo autenticar no es una fuente primaria en sentido estricto**. Antes
+de citarlo en un dictamen, contrastarlo contra otra copia oficial.
+SHA-256 de la copia consultada:
+`de7471770a3d4c27de1e15ea90d00ac402f6933a1854bd720151ab3b089eb632`.
 
 **Hallazgo, y es el que da sentido a este proyecto:** la resolución **no contiene
 disposiciones específicas sobre evidencia digital**. El sistema de cadena de
@@ -179,28 +227,29 @@ traslado—, y para un disco o un buzón esas categorías hay que traducirlas. L
 traducción no está en la norma; la pone el perito, y por eso tiene que poder
 justificarla.
 
-Leído el índice del *Manual de Procedimientos para Cadena de Custodia* de la
-Fiscalía, el hallazgo se confirma y se puede precisar. Sus **trece
+### 3.5 Qué contenía la edición anterior, y por qué se deja escrito
+
+Leído el índice del *Manual de Procedimientos para Cadena de Custodia* —la
+edición **derogada**, la única cuyo texto pude consultar—, sus **trece
 procedimientos** (FGN-CC-\*) van del manejo del lugar de los hechos al envío al
 almacén de evidencias, la recepción en el laboratorio y la disposición final. Y
-cuando el manual distingue categorías, las distingue **por el origen** del
-elemento —asistencia judicial con el extranjero, agente encubierto, entrega
-vigilada, entidades prestadoras de servicios de salud—, **nunca por su
-naturaleza**. No hay procedimiento de evidencia digital: no está omitido por
-descuido, es que el sistema entero está pensado sobre el objeto que se embala.
+cuando distingue categorías, las distingue **por el origen** del elemento
+—asistencia judicial con el extranjero, agente encubierto, entrega vigilada,
+entidades prestadoras de servicios de salud—, **nunca por su naturaleza**. No
+había procedimiento de evidencia digital, y no parece un descuido: el sistema
+está construido sobre el objeto que se embala, se traslada y se almacena.
 
-**Pendiente de verificar:** el ejemplar consultado es un manual de la Fiscalía,
-pero no pude confirmar que sea exactamente el anexo a la Resolución 2369 de 2016
-—el archivo procede del repositorio de la Rama Judicial y sus metadatos son de
-2011—. Antes de citar numerales concretos en un dictamen hay que trabajar sobre
-el ejemplar vigente.
+Se deja constancia porque es el antecedente que explica el enfoque —y porque
+sirve de hipótesis a verificar contra la edición de 2018—, no como descripción
+del derecho vigente.
 
 **Fuentes:** [CPP art. 254](https://leyes.co/codigo_de_procedimiento_penal/254.htm),
 [art. 255](https://leyes.co/codigo_de_procedimiento_penal/255.htm),
 [art. 256](https://leyes.co/codigo_de_procedimiento_penal/256.htm),
 [art. 257](https://leyes.co/codigo_de_procedimiento_penal/257.htm);
-[Resolución FGN 2369 de 2016 (normograma JEP)](https://jurinfo.jep.gov.co/normograma/compilacion/docs/resolucion_fiscalia_2369_2016.htm);
-[Manual de cadena de custodia (FGN)](https://www.fiscalia.gov.co/colombia/wp-content/uploads/policiajudicial/DOC-CNPJ/Manual%20de%20cadena%20custodia.pdf).
+[Acuerdo 001 de 2018 del Consejo Nacional de Policía Judicial (PDF, INMLCF)](https://www.medicinalegal.gov.co/documents/20143/1207211/2018_001_Manual_cadena_custodia.pdf);
+[Resolución FGN 2369 de 2016, **derogada** (normograma JEP)](https://jurinfo.jep.gov.co/normograma/compilacion/docs/resolucion_fiscalia_2369_2016.htm);
+[Manual de Procedimientos para Cadena de Custodia, edición anterior (PDF, Rama Judicial)](https://sidn.ramajudicial.gov.co/SIDN/DOCTRINA/TABLAS%20DE%20CONTENIDO%20Y%20TEXTOS%20COMPLETOS/345%20-%20DERECHO%20PROCESAL%20PENAL%20Y%20PROCESAL%20CIVIL/14843_Manual_de_procedimientos_para_Colombia.pdf).
 
 ---
 
