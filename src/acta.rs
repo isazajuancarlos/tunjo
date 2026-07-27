@@ -84,7 +84,30 @@ pub struct Elemento {
     pub modificado_utc: String,
     /// `leido`, `directorio`, `enlace -> destino` o `ERROR: <motivo>`.
     pub estado: String,
+    /// CÓMO se calculó `sha256`. Vacío o ausente significa el método normal:
+    /// SHA-256 de los bytes del archivo.
+    ///
+    /// Existe porque no todo lo que se sella se verifica leyendo bytes. Una
+    /// hoja de glifos de Quipu se reimprime, se escanea y se fotografía: sus
+    /// BYTES cambian en cada viaje mientras el contenido que transporta es el
+    /// mismo. Sellar el archivo haría que el control fallara siempre; hay que
+    /// sellar la huella del portador, que se calcula tras corregir el daño.
+    ///
+    /// Y hay que decir cuál se usó, porque un acta cuya huella nadie sabe
+    /// recomputar no sirve como prueba: quien verifica tiene que poder repetir
+    /// el cálculo con la herramienta correcta.
+    ///
+    /// Valores: vacío (bytes del archivo) o `quipu-portador-v1`.
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub metodo_huella: String,
 }
+
+/// El método de huella que se verifica leyendo los bytes del archivo.
+pub const HUELLA_ARCHIVO: &str = "";
+/// Huella del PORTADOR de una hoja de glifos de Quipu: se obtiene tras
+/// reconocer los glifos y corregir los errores, así que sobrevive al viaje por
+/// papel. Se verifica con `quipu::api::huella_del_portador`, no leyendo bytes.
+pub const HUELLA_PORTADOR_QUIPU: &str = "quipu-portador-v1";
 
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
 pub struct Firma {
@@ -295,6 +318,7 @@ mod pruebas {
                 sha256: "aa".into(),
                 modificado_utc: "2026-07-26T09:00:00Z".into(),
                 estado: "leido".into(),
+                metodo_huella: String::new(),
             }],
             raiz_merkle: String::new(),
             firma: None,

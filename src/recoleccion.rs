@@ -108,6 +108,7 @@ pub fn recolectar(origen: &Path) -> Result<Recoleccion> {
                     sha256: String::new(),
                     modificado_utc: String::new(),
                     estado: format!("ERROR: {err}"),
+                    metodo_huella: String::new(),
                 });
                 continue;
             }
@@ -126,6 +127,7 @@ pub fn recolectar(origen: &Path) -> Result<Recoleccion> {
                 sha256: String::new(),
                 modificado_utc: modificado(&meta),
                 estado: format!("enlace -> {destino}"),
+                metodo_huella: String::new(),
             });
         } else if meta.is_dir() {
             elementos.push(Elemento {
@@ -135,6 +137,7 @@ pub fn recolectar(origen: &Path) -> Result<Recoleccion> {
                 sha256: String::new(),
                 modificado_utc: modificado(&meta),
                 estado: "directorio".into(),
+                metodo_huella: String::new(),
             });
         } else {
             elementos.push(elemento_de_archivo(&ruta, rel, &mut ilegibles));
@@ -155,6 +158,7 @@ fn elemento_de_archivo(ruta: &Path, rel: String, ilegibles: &mut Vec<String>) ->
             sha256: sha,
             modificado_utc,
             estado: "leido".into(),
+            metodo_huella: String::new(),
         },
         Err(err) => {
             ilegibles.push(format!("{rel}: {err}"));
@@ -165,6 +169,7 @@ fn elemento_de_archivo(ruta: &Path, rel: String, ilegibles: &mut Vec<String>) ->
                 sha256: String::new(),
                 modificado_utc,
                 estado: format!("ERROR: {err}"),
+                metodo_huella: String::new(),
             }
         }
     }
@@ -201,6 +206,28 @@ pub fn contrastar(elementos: &[Elemento], origen: &Path) -> Result<Vec<Discrepan
     let mut discrepancias = Vec::new();
 
     for esperado in elementos {
+        // Un elemento sellado con OTRO método no se verifica leyendo bytes, y
+        // recomputar el SHA-256 del archivo daría ALTERADO en cada verificación
+        // aunque todo esté bien. Se dice que hace falta otra herramienta; no se
+        // da por bueno ni por alterado.
+        if !esperado.metodo_huella.is_empty() {
+            match actual.elementos.iter().find(|e| e.ruta == esperado.ruta) {
+                None => discrepancias.push(Discrepancia::Ausente {
+                    ruta: esperado.ruta.clone(),
+                }),
+                Some(_) => discrepancias.push(Discrepancia::NoVerificable {
+                    ruta: esperado.ruta.clone(),
+                    motivo: format!(
+                        "sellado con «{}»: el archivo está, pero su huella no se \
+                         comprueba leyendo bytes. Verifíquelo con la herramienta \
+                         de ese método y compare contra el acta.",
+                        esperado.metodo_huella
+                    ),
+                }),
+            }
+            continue;
+        }
+
         match actual.elementos.iter().find(|e| e.ruta == esperado.ruta) {
             None => discrepancias.push(Discrepancia::Ausente { ruta: esperado.ruta.clone() }),
             Some(hallado) => {
