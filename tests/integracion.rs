@@ -376,7 +376,119 @@ fn sellado_concurrente_sin_interbloqueo() {
     for _ in 0..HEBRAS {
         match rx.recv_timeout(Duration::from_secs(120)) {
             Ok((h, ok)) => assert!(ok, "la hebra {h} produjo un acta que no verifica"),
-            Err(e) => panic!("interbloqueo o hebra muerta al sellar en paralelo: {e}"),
+            // El temporizador NO distingue un interbloqueo de una hebra lenta,
+            // así que el mensaje no puede afirmar cuál de los dos fue. Decía
+            // «interbloqueo» y el 2026-07-26 lo que había era SLH-DSA sin
+            // optimizar: 120 s no bastaban en `dev`, 12 s sobraban en
+            // `release`. Un diagnóstico equivocado en el mensaje manda a quien
+            // lo lea a buscar un candado que no existe.
+            Err(e) => panic!(
+                "ninguna hebra respondió a tiempo al sellar en paralelo: {e}.\n\
+                 Puede ser interbloqueo O lentitud, y esto no los distingue: \
+                 comprobar primero con --release, que descarta el coste de las \
+                 primitivas sin optimizar."
+            ),
         }
     }
+}
+
+// ===========================================================================
+// HUELLAS QUE NO SE VERIFICAN LEYENDO BYTES
+//
+// Una hoja de glifos de Quipu se reimprime, se escanea y se fotografía: sus
+// BYTES cambian en cada viaje mientras el contenido que transporta es el
+// mismo. Sellar el archivo haría que el control fallara SIEMPRE, y un control
+// que falla siempre es peor que no tenerlo: enseña a ignorarlo.
+//
+// Por eso el elemento lleva `metodo_huella`, y por eso `contrastar` no puede
+// tratarlo como si fuera un archivo normal.
+// ===========================================================================
+
+use tunjo::acta::{Elemento, HUELLA_PORTADOR_QUIPU};
+
+/// Un elemento sellado con otro método, apuntando a un archivo que SÍ existe.
+fn elemento_portador(ruta: &str) -> Elemento {
+    Elemento {
+        ruta: ruta.into(),
+        tipo: "archivo".into(),
+        bytes: 0,
+        // La huella NO es el SHA-256 del archivo: viene de reconocer los
+        // glifos y corregir el daño.
+        sha256: "0".repeat(64),
+        modificado_utc: String::new(),
+        estado: "leido".into(),
+        metodo_huella: HUELLA_PORTADOR_QUIPU.into(),
+    }
+}
+
+#[test]
+fn una_huella_de_portador_no_se_reporta_como_alterada() {
+    // ES LA PRUEBA QUE JUSTIFICA EL CAMPO. Sin ella, `contrastar` recomputaría
+    // el SHA-256 del PNG, no cuadraría con la huella del portador, y daría
+    // ALTERADO en cada verificación aunque todo estuviera perfecto.
+    let dir = tempfile::tempdir().unwrap();
+    fs::write(dir.path().join("secreto.png"), b"unos bytes cualesquiera").unwrap();
+
+    let d = recoleccion::contrastar(&[elemento_portador("secreto.png")], dir.path()).unwrap();
+
+    assert!(
+        !d.iter().any(|x| matches!(x, Discrepancia::Alterado { .. })),
+        "reportó ALTERADO una huella que no se verifica leyendo bytes: {d:?}",
+    );
+    assert!(
+        d.iter().any(|x| matches!(x, Discrepancia::NoVerificable { .. })),
+        "tampoco puede callarse: hay que decir que se necesita otra \
+         herramienta, no dar por bueno lo que no se comprobó. {d:?}",
+    );
+}
+
+#[test]
+fn el_motivo_dice_que_metodo_hace_falta() {
+    // Un acta cuya huella nadie sabe recomputar no sirve como prueba: quien
+    // verifica tiene que saber con qué herramienta repetir el cálculo.
+    let dir = tempfile::tempdir().unwrap();
+    fs::write(dir.path().join("secreto.png"), b"x").unwrap();
+
+    let d = recoleccion::contrastar(&[elemento_portador("secreto.png")], dir.path()).unwrap();
+    let motivo = d
+        .iter()
+        .find_map(|x| match x {
+            Discrepancia::NoVerificable { motivo, .. } => Some(motivo.clone()),
+            _ => None,
+        })
+        .expect("debía haber una NoVerificable");
+
+    assert!(
+        motivo.contains(HUELLA_PORTADOR_QUIPU),
+        "el motivo no nombra el método: «{motivo}»",
+    );
+}
+
+#[test]
+fn si_el_archivo_no_esta_sigue_siendo_ausente() {
+    // El método distinto no puede volverse una excusa para no notar que la
+    // pieza desapareció. Eso sí se comprueba sin leer bytes.
+    let dir = tempfile::tempdir().unwrap();
+    let d = recoleccion::contrastar(&[elemento_portador("no_existe.png")], dir.path()).unwrap();
+    assert!(
+        d.iter().any(|x| matches!(x, Discrepancia::Ausente { .. })),
+        "un portador ausente pasó inadvertido: {d:?}",
+    );
+}
+
+#[test]
+fn un_archivo_normal_sigue_verificandose_por_bytes() {
+    // Que discrimine: si el cambio hubiera desactivado la verificación normal,
+    // las tres de arriba pasarían y el acta no serviría para nada.
+    let dir = tempfile::tempdir().unwrap();
+    fs::write(dir.path().join("dato.txt"), b"original").unwrap();
+    let acta_antes = recoleccion::recolectar(dir.path()).unwrap();
+
+    fs::write(dir.path().join("dato.txt"), b"alterado").unwrap();
+    let d = recoleccion::contrastar(&acta_antes.elementos, dir.path()).unwrap();
+
+    assert!(
+        d.iter().any(|x| matches!(x, Discrepancia::Alterado { .. })),
+        "un archivo normal alterado NO se detectó: {d:?}",
+    );
 }

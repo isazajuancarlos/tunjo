@@ -47,3 +47,17 @@ getrandom = { version = "0.4", features = ["std"] }
 
 [dev-dependencies]
 tempfile = "3"
+
+# Las DEPENDENCIAS optimizadas incluso en depuración; el crate propio no.
+#
+# `generate_triple_keypair` incluye SLH-DSA, que sin optimizar es órdenes de
+# magnitud más lento. Medido el 2026-07-26: `sellado_concurrente_sin_interbloqueo`
+# —8 hebras generando claves a la vez— tardaba MÁS DE 120 s en `dev` y 12 s en
+# `release`. Reventaba su propio temporizador y acusaba de «interbloqueo» a algo
+# que solo era lentitud, con la suite entera en 494 s.
+#
+# Subir el temporizador habría sido tapar el síntoma. Esto quita la causa y deja
+# intacta la depuración del código de Tunjo, que es el que se lee con el
+# depurador.
+[profile.dev.package."*"]
+opt-level = 3
