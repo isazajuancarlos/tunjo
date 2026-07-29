@@ -472,7 +472,17 @@ fn orden_custodia(accion: Custodia) -> Result<bool> {
                     Ok(false)
                 }
                 custodia::Veredicto::SinGenesis => {
-                    println!("✗ La cadena no tiene evento génesis: no atestigua ninguna custodia sobre el acta.");
+                    // Las dos formas de no tener génesis se dicen distinto: una
+                    // cadena vacía no atestigua nada, y una que arranca en el
+                    // eslabón N oculta todo lo anterior a N.
+                    let detalle = match cadena.eslabones.first() {
+                        None => "está vacía: cero eslabones".to_string(),
+                        Some(e) => format!("arranca en el eslabón {}, no en el 0", e.secuencia),
+                    };
+                    println!(
+                        "✗ La cadena no arranca en el evento génesis ({detalle}):\n  \
+                         no atestigua ninguna custodia."
+                    );
                     Ok(false)
                 }
             }

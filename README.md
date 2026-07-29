@@ -109,8 +109,10 @@ tunjo custodia evento --cadena cadena.json --clave perito.clave \
   --actor "Laboratorio Forense X" --identificacion "NIT 900.000" \
   --descripcion "Entregada al laboratorio para extracción"
 
-# Verificar la cadena entera (eslabones, firmas triple, secuencia) y, con
-# --acta, que corresponde a esa evidencia. La verifica cualquiera.
+# Verificar la cadena entera: que arranque en el génesis y siga sin saltos
+# (eslabones, firmas triple, secuencia). Con --acta comprueba además que
+# corresponde a esa evidencia y que la firmó su mismo perito. La verifica
+# cualquiera.
 tunjo custodia verificar --cadena cadena.json --acta acta.json
 ```
 

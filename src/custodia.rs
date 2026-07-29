@@ -105,8 +105,9 @@ pub enum Veredicto {
     /// La cadena es íntegra pero la firmó una clave que NO es la del perito del
     /// acta: no la levantó quien selló la evidencia.
     FirmanteAjeno { esperado: String, encontrado: String },
-    /// Se pidió contrastar contra un acta pero la cadena no tiene génesis: una
-    /// cadena vacía no atestigua ninguna custodia.
+    /// La cadena no arranca en el eslabón 0: está vacía, o su primer eslabón lleva
+    /// otra secuencia. Sin génesis no atestigua ninguna custodia —falte el
+    /// principio o falte entera—, así que no puede declararse íntegra.
     SinGenesis,
 }
 
@@ -203,9 +204,10 @@ pub fn agregar(cadena: &mut Cadena, evento: Evento, sk: &TripleSigningKey) -> Re
     Ok(())
 }
 
-/// Verifica la cadena entera: eslabones, hashes, firmas triple y contigüidad. Si
-/// se pasa el [`Ancla`] del acta, comprueba además que la cadena (a) tiene
-/// génesis, (b) la firmó el MISMO perito que el acta, y (c) ancla ese acta. Falla
+/// Verifica la cadena entera: que arranque en el génesis, y luego eslabones,
+/// hashes, firmas triple y contigüidad. Si se pasa el [`Ancla`] del acta,
+/// comprueba además que (a) la firmó el MISMO perito que el acta y (b) ancla
+/// ese acta —por autor y por contenido, respectivamente—. Falla
 /// ruidosamente si la clave pública o algún hash no son válidos: una cadena que
 /// no se puede ni leer no es una cadena.
 pub fn verificar(cadena: &Cadena, acta: Option<Ancla>) -> Result<Veredicto> {
@@ -236,16 +238,20 @@ pub fn verificar(cadena: &Cadena, acta: Option<Ancla>) -> Result<Veredicto> {
         return Ok(Veredicto::Rota { secuencia, motivo: format!("{motivo:?}") });
     }
 
+    // Los eslabones se encadenan bien ENTRE SÍ. Pero `verificar_con` solo exige la
+    // contigüidad a partir del SEGUNDO: al primero solo le pide `hash_anterior ==
+    // GENESIS`, no que su secuencia sea 0. Una cadena fabricada que arranque en
+    // `seq=5` le cuadra entera. Ese arranque se exige aquí, SIEMPRE —con acta o
+    // sin ella—: sin génesis no hay «sin saltos» que declarar, y `acta_sha256`
+    // queda como un campo suelto que nadie firmó.
+    if !cadena.eslabones.first().is_some_and(|e| e.secuencia == 0) {
+        return Ok(Veredicto::SinGenesis);
+    }
+
     // La cadena es íntegra. Si se pide contrastar contra un acta, hay que atarla
-    // a ese acta por CONTENIDO y por AUTOR — y exigir que haya génesis.
+    // a ese acta por CONTENIDO y por AUTOR.
     if let Some(ancla) = acta {
-        // (a) Génesis: sin él, `acta_sha256` es un campo suelto que nadie firmó,
-        //     y una cadena vacía «correspondería» a cualquier acta.
-        let hay_genesis = cadena.eslabones.first().is_some_and(|e| e.secuencia == 0);
-        if !hay_genesis {
-            return Ok(Veredicto::SinGenesis);
-        }
-        // (b) Autor: el firmante de la cadena tiene que ser el perito del acta.
+        // (a) Autor: el firmante de la cadena tiene que ser el perito del acta.
         //     Sin esto, cualquiera fabrica una cadena con SU clave anclada a un
         //     acta ajena y «corresponde».
         if cadena.clave_publica != ancla.clave_publica {
@@ -254,7 +260,7 @@ pub fn verificar(cadena: &Cadena, acta: Option<Ancla>) -> Result<Veredicto> {
                 encontrado: cadena.clave_publica.clone(),
             });
         }
-        // (c) Contenido: el ancla firmada en el génesis es el hash de este acta.
+        // (b) Contenido: el ancla firmada en el génesis es el hash de este acta.
         //     (Si `acta_sha256` estuviera falseada, el génesis ya habría roto.)
         let esperado = sha256_hex(ancla.bytes_canonicos);
         if esperado != cadena.acta_sha256 {
@@ -410,6 +416,52 @@ mod pruebas {
         };
         let a = Ancla { bytes_canonicos: acta, clave_publica: &vacia.clave_publica };
         assert_eq!(verificar(&vacia, Some(a)).unwrap(), Veredicto::SinGenesis);
+    }
+
+    /// Ultrareview bug_004: `guaca::auditoria::verificar_con` solo exige la
+    /// contigüidad A PARTIR del segundo eslabón, así que una cadena fabricada que
+    /// arranca en `seq=5` con `hash_anterior = GENESIS` le cuadra entera —hashes y
+    /// firmas incluidos—. El salto de GENESIS a 5 ES un salto: no puede reportarse
+    /// «íntegra, sin saltos», se dé o no el acta.
+    #[test]
+    fn una_cadena_que_no_arranca_en_cero_no_es_integra() {
+        let (_, sk) = generate_triple_keypair();
+        let mut eslabones: Vec<Eslabon> = Vec::new();
+        let mut anterior = GENESIS;
+        for secuencia in 5..8u64 {
+            let ev = evento("analisis", "quien fabrica");
+            let cont = contenido_de(&ev, None);
+            let sello = auditoria::sellar_con(secuencia, anterior, &cont, firmante(&sk)).unwrap();
+            eslabones.push(Eslabon {
+                secuencia,
+                hash_anterior: a_hex(&anterior),
+                evento: ev,
+                hash: a_hex(&sello.hash),
+                firma: sello.firma,
+            });
+            anterior = sello.hash;
+        }
+        let c = Cadena {
+            formato: FORMATO_CADENA.to_string(),
+            acta_sha256: sha256_hex(b"un acta cualquiera"),
+            clave_publica: STANDARD.encode(sk.verifying_key().to_bytes()),
+            eslabones,
+        };
+        assert_eq!(verificar(&c, None).unwrap(), Veredicto::SinGenesis);
+    }
+
+    /// Y una cadena vacía tampoco atestigua nada SIN acta: `verificar_con` la da
+    /// por trivialmente intacta, pero cero eslabones no son una custodia.
+    #[test]
+    fn una_cadena_vacia_no_es_integra_ni_sin_acta() {
+        let (_, sk) = generate_triple_keypair();
+        let vacia = Cadena {
+            formato: FORMATO_CADENA.to_string(),
+            acta_sha256: sha256_hex(b"acta"),
+            clave_publica: STANDARD.encode(sk.verifying_key().to_bytes()),
+            eslabones: vec![],
+        };
+        assert_eq!(verificar(&vacia, None).unwrap(), Veredicto::SinGenesis);
     }
 
     /// Security-review nota: un hash con un carácter UTF-8 multibyte (de una
