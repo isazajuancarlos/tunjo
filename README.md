@@ -119,6 +119,17 @@ tunjo custodia verificar --cadena cadena.json --acta acta.json
 Va firmada al **mismo nivel que el acta** (Ed25519 + ML-DSA-87 + SLH-DSA): la
 custodia no puede ser el eslabón criptográficamente débil de la prueba.
 
+**Lo que la cadena NO prueba.** Una cadena de hashes prueba que lo que hay es un
+**prefijo íntegro**: que nadie borró, alteró ni reordenó nada *entre* el génesis
+y el último eslabón presente. No puede probar que ese último eslabón sea el
+último que existió — quien tenga la clave puede quedarse con los primeros N
+eventos y entregar solo esos, y la cadena verifica ÍNTEGRA. Ninguna cadena de
+hashes puede cerrar ese hueco por sí sola, y `tunjo` todavía no sella la cadena
+como sella el acta: lo que lo cierra es **sacar el último hash del alcance de
+quien custodia** —dejarlo en el expediente, comunicarlo a la contraparte— en
+cada entrega. Que la cadena esté íntegra dice que no está *manipulada*, no que
+esté *completa*.
+
 ## Fecha cierta: `--sello`
 
 Sin sello de tiempo, un acta prueba **orden relativo**: la hora la pone el reloj
