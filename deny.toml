@@ -1,0 +1,40 @@
+# cargo-deny — control de cadena de suministro (lección Atomic Arch, #143).
+# tunjo es la herramienta de peritaje (AGPL) sobre Quipu + guaca. Exige que TODA
+# dependencia venga de una fuente autorizada (crates.io o el git de guaca),
+# prohíbe comodines de versión y controla licencias.
+
+[advisories]
+version = 2
+
+[licenses]
+version = 2
+# Allowlist ajustada al árbol real (directiva 23): una licencia nueva = rojo.
+allow = [
+    "MIT",
+    "Apache-2.0",
+    "Apache-2.0 WITH LLVM-exception",
+    "BSD-1-Clause",
+    "BSD-2-Clause",
+    "BSD-3-Clause",
+    "BSL-1.0",
+    "0BSD",
+    "ISC",                  # ring, rustls, rustls-webpki, untrusted (cliente TLS)
+    "CDLA-Permissive-2.0",  # webpki-roots (raíces de confianza TLS)
+    "Unicode-3.0",
+    "Unlicense",
+    "Zlib",
+    # tunjo, quipu y guaca son AGPL (de casa; licencia comercial aparte).
+    "AGPL-3.0-or-later",
+]
+confidence-threshold = 0.8
+
+[bans]
+multiple-versions = "warn"
+wildcards = "deny"
+
+[sources]
+# El corazón anti-Atomic-Arch: fuente inesperada = rojo. La única dep git
+# autorizada es guaca (fijada además por rev en Cargo.toml).
+unknown-registry = "deny"
+unknown-git = "deny"
+allow-git = ["https://github.com/isazajuancarlos/guaca"]

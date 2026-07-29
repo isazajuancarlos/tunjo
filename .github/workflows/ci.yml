@@ -25,3 +25,19 @@ jobs:
         run: cargo clippy --all-targets --release -- -D warnings
       - name: test
         run: cargo test --release
+
+  cadena-suministro:
+    name: cargo-deny (supply chain)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      # cargo-deny: exige que toda dependencia venga de una fuente autorizada
+      # (crates.io o el git de guaca), prohíbe comodines de versión y controla
+      # licencias — la defensa contra que una dep se traiga de una fuente
+      # inesperada (vector del ataque Atomic Arch). Config en deny.toml.
+      - name: cargo-deny
+        run: |
+          cargo install cargo-deny --locked
+          cargo deny check

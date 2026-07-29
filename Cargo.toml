@@ -7,6 +7,10 @@ edition = "2024"
 description = "Sellado criptográfico y acta de cadena de custodia para evidencia digital, con firma post-cuántica."
 authors = ["Juan Carlos Isaza Arenas <isazajuancarlos@gmail.com>"]
 license = "AGPL-3.0-or-later"
+# No se publica en crates.io: depende de guaca por git (crates.io no admite deps
+# git) y es una app de peritaje, no una librería. Explícito para que un
+# `cargo publish` accidental falle y para que cargo-deny lo trate como privado.
+publish = false
 keywords = ["forensics", "chain-of-custody", "post-quantum", "evidence", "peritaje"]
 categories = ["command-line-utilities", "cryptography"]
 readme = "README.md"
@@ -26,7 +30,10 @@ homepage = "https://github.com/isazajuancarlos/tunjo"
 quipu = { version = "0.10", features = ["slh"] }
 # La cadena de custodia usa el encadenamiento de guaca, firmado en TRIPLE (el
 # firmante lo pone tunjo, que ya tiene SLH-DSA). guaca aporta solo la cadena.
-guaca = { git = "https://github.com/isazajuancarlos/guaca", tag = "v0.3.0" }
+# Fijada por commit inmutable (= tag v0.3.0), no por el tag: un tag es mutable, y
+# mover `v0.3.0` a un commit malicioso nos lo traería al construir (lección del
+# ataque Atomic Arch a AUR). El Cargo.lock ya lo fijaba; esto lo hace explícito.
+guaca = { git = "https://github.com/isazajuancarlos/guaca", rev = "9d26cceccc95cbe146f3e6a0cac7b44b04ef7cfb", version = "0.3" }
 sha2 = "0.11"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
