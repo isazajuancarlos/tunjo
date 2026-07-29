@@ -82,15 +82,32 @@ pub struct Cadena {
     pub eslabones: Vec<Eslabon>,
 }
 
+/// La referencia al acta contra la que se contrasta una cadena: sus bytes
+/// canónicos (para el ancla) y la clave pública del perito que la firmó. Ambas
+/// hacen falta: el ancla ata la cadena al CONTENIDO del acta, y la clave la ata
+/// a su AUTOR —sin lo segundo, cualquiera fabrica una cadena con su propia clave
+/// que «corresponde» a un acta ajena—.
+pub struct Ancla<'a> {
+    pub bytes_canonicos: &'a [u8],
+    pub clave_publica: &'a str,
+}
+
 /// Veredicto de verificar una cadena.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Veredicto {
-    /// La cadena es íntegra y —si se dio el acta— le corresponde.
+    /// La cadena es íntegra y —si se dio el acta— le corresponde y la firmó su
+    /// mismo perito.
     Intacta,
     /// La PRIMERA ruptura hallada.
     Rota { secuencia: u64, motivo: String },
-    /// La cadena es íntegra pero es de OTRA acta que la entregada.
+    /// La cadena es íntegra pero ancla OTRA acta que la entregada.
     ActaNoCorresponde { esperado: String, encontrado: String },
+    /// La cadena es íntegra pero la firmó una clave que NO es la del perito del
+    /// acta: no la levantó quien selló la evidencia.
+    FirmanteAjeno { esperado: String, encontrado: String },
+    /// Se pidió contrastar contra un acta pero la cadena no tiene génesis: una
+    /// cadena vacía no atestigua ninguna custodia.
+    SinGenesis,
 }
 
 fn a_hex(b: &[u8]) -> String {
@@ -98,7 +115,10 @@ fn a_hex(b: &[u8]) -> String {
 }
 
 fn de_hex32(s: &str) -> Option<[u8; 32]> {
-    if s.len() != 64 {
+    // `!s.is_ascii()` evita el panic de indexar un &str a mitad de un carácter
+    // UTF-8 multibyte: un hash de una cadena.json manipulada no debe tumbar la
+    // verificación, sino rechazarse.
+    if s.len() != 64 || !s.is_ascii() {
         return None;
     }
     let mut out = [0u8; 32];
@@ -184,10 +204,11 @@ pub fn agregar(cadena: &mut Cadena, evento: Evento, sk: &TripleSigningKey) -> Re
 }
 
 /// Verifica la cadena entera: eslabones, hashes, firmas triple y contigüidad. Si
-/// se pasan los bytes canónicos del acta, comprueba además que la cadena le
-/// corresponde. Falla ruidosamente si la clave pública o algún hash no son
-/// válidos: una cadena que no se puede ni leer no es una cadena.
-pub fn verificar(cadena: &Cadena, acta_bytes_canonicos: Option<&[u8]>) -> Result<Veredicto> {
+/// se pasa el [`Ancla`] del acta, comprueba además que la cadena (a) tiene
+/// génesis, (b) la firmó el MISMO perito que el acta, y (c) ancla ese acta. Falla
+/// ruidosamente si la clave pública o algún hash no son válidos: una cadena que
+/// no se puede ni leer no es una cadena.
+pub fn verificar(cadena: &Cadena, acta: Option<Ancla>) -> Result<Veredicto> {
     let vk_bytes = STANDARD
         .decode(&cadena.clave_publica)
         .map_err(|_| anyhow!("la clave pública de la cadena no es base64 válido"))?;
@@ -215,11 +236,27 @@ pub fn verificar(cadena: &Cadena, acta_bytes_canonicos: Option<&[u8]>) -> Result
         return Ok(Veredicto::Rota { secuencia, motivo: format!("{motivo:?}") });
     }
 
-    // La cadena es íntegra. ¿Es de ESTA acta? (El ancla ya va firmada en el
-    // génesis, así que si estuviera falseada la comprobación de arriba habría
-    // fallado; esto solo contrasta contra el acta que trae quien verifica.)
-    if let Some(bytes) = acta_bytes_canonicos {
-        let esperado = sha256_hex(bytes);
+    // La cadena es íntegra. Si se pide contrastar contra un acta, hay que atarla
+    // a ese acta por CONTENIDO y por AUTOR — y exigir que haya génesis.
+    if let Some(ancla) = acta {
+        // (a) Génesis: sin él, `acta_sha256` es un campo suelto que nadie firmó,
+        //     y una cadena vacía «correspondería» a cualquier acta.
+        let hay_genesis = cadena.eslabones.first().is_some_and(|e| e.secuencia == 0);
+        if !hay_genesis {
+            return Ok(Veredicto::SinGenesis);
+        }
+        // (b) Autor: el firmante de la cadena tiene que ser el perito del acta.
+        //     Sin esto, cualquiera fabrica una cadena con SU clave anclada a un
+        //     acta ajena y «corresponde».
+        if cadena.clave_publica != ancla.clave_publica {
+            return Ok(Veredicto::FirmanteAjeno {
+                esperado: ancla.clave_publica.to_string(),
+                encontrado: cadena.clave_publica.clone(),
+            });
+        }
+        // (c) Contenido: el ancla firmada en el génesis es el hash de este acta.
+        //     (Si `acta_sha256` estuviera falseada, el génesis ya habría roto.)
+        let esperado = sha256_hex(ancla.bytes_canonicos);
         if esperado != cadena.acta_sha256 {
             return Ok(Veredicto::ActaNoCorresponde {
                 esperado,
@@ -264,12 +301,18 @@ mod pruebas {
         (c, sk)
     }
 
+    /// El ancla del acta cuando el firmante de la cadena ES el perito (caso
+    /// legítimo): misma clave que firmó la cadena.
+    fn ancla_propia<'a>(c: &'a Cadena, acta: &'a [u8]) -> Ancla<'a> {
+        Ancla { bytes_canonicos: acta, clave_publica: &c.clave_publica }
+    }
+
     #[test]
     fn una_cadena_bien_formada_verifica_y_corresponde_al_acta() {
         let acta = b"bytes canonicos del acta";
         let (c, _) = cadena_de_tres(acta);
         assert_eq!(c.eslabones.len(), 3);
-        assert_eq!(verificar(&c, Some(acta)).unwrap(), Veredicto::Intacta);
+        assert_eq!(verificar(&c, Some(ancla_propia(&c, acta))).unwrap(), Veredicto::Intacta);
         assert_eq!(verificar(&c, None).unwrap(), Veredicto::Intacta);
     }
 
@@ -279,7 +322,7 @@ mod pruebas {
         let (mut c, _) = cadena_de_tres(acta);
         c.eslabones[1].evento.descripcion = "lo entregué a otro, en realidad".into();
         assert!(matches!(
-            verificar(&c, Some(acta)).unwrap(),
+            verificar(&c, Some(ancla_propia(&c, acta))).unwrap(),
             Veredicto::Rota { secuencia: 1, .. }
         ));
     }
@@ -290,7 +333,7 @@ mod pruebas {
         let (mut c, _) = cadena_de_tres(acta);
         c.eslabones.remove(1); // desaparece la transferencia
         assert!(matches!(
-            verificar(&c, Some(acta)).unwrap(),
+            verificar(&c, Some(ancla_propia(&c, acta))).unwrap(),
             Veredicto::Rota { secuencia: 2, .. }
         ));
     }
@@ -298,7 +341,9 @@ mod pruebas {
     #[test]
     fn una_cadena_de_otra_acta_no_corresponde() {
         let (c, _) = cadena_de_tres(b"acta A");
-        match verificar(&c, Some(b"acta B (otra)")).unwrap() {
+        // Mismo perito (pasa el chequeo de autor), pero otro acta.
+        let a = Ancla { bytes_canonicos: b"acta B (otra)", clave_publica: &c.clave_publica };
+        match verificar(&c, Some(a)).unwrap() {
             Veredicto::ActaNoCorresponde { .. } => {}
             otro => panic!("debía ser ActaNoCorresponde, fue {otro:?}"),
         }
@@ -329,9 +374,51 @@ mod pruebas {
         let re = auditoria::sellar_con(1, anterior, &cont, firmante(&otra_sk)).unwrap();
         c.eslabones[1].firma = re.firma;
         assert!(matches!(
-            verificar(&c, Some(acta)).unwrap(),
+            verificar(&c, Some(ancla_propia(&c, acta))).unwrap(),
             Veredicto::Rota { secuencia: 1, motivo } if motivo.contains("Firma")
         ));
+    }
+
+    /// Security-review Vuln 1: una cadena internamente VÁLIDA, firmada por OTRA
+    /// clave y anclada al hash de un acta ajena, NO debe «corresponder» a ese
+    /// acta. Antes daba Intacta; ahora la ata al autor.
+    #[test]
+    fn una_cadena_de_otro_firmante_no_corresponde_al_acta() {
+        let acta = b"acta legitima publicada";
+        let (c_ajena, _) = cadena_de_tres(acta); // firmada por una clave cualquiera
+        // La clave REAL del perito del acta es otra.
+        let (perito_vk, _) = generate_triple_keypair();
+        let perito_pub = STANDARD.encode(perito_vk.to_bytes());
+        let a = Ancla { bytes_canonicos: acta, clave_publica: &perito_pub };
+        match verificar(&c_ajena, Some(a)).unwrap() {
+            Veredicto::FirmanteAjeno { .. } => {}
+            otro => panic!("una cadena de otro firmante debía ser FirmanteAjeno, fue {otro:?}"),
+        }
+    }
+
+    /// Security-review Vuln 2: una cadena VACÍA (sin génesis) no atestigua nada;
+    /// no puede «corresponder» a un acta aunque su campo acta_sha256 cuadre.
+    #[test]
+    fn una_cadena_vacia_no_corresponde_al_acta() {
+        let acta = b"acta legitima";
+        let (_, sk) = generate_triple_keypair();
+        let vacia = Cadena {
+            formato: FORMATO_CADENA.to_string(),
+            acta_sha256: sha256_hex(acta),
+            clave_publica: STANDARD.encode(sk.verifying_key().to_bytes()),
+            eslabones: vec![],
+        };
+        let a = Ancla { bytes_canonicos: acta, clave_publica: &vacia.clave_publica };
+        assert_eq!(verificar(&vacia, Some(a)).unwrap(), Veredicto::SinGenesis);
+    }
+
+    /// Security-review nota: un hash con un carácter UTF-8 multibyte (de una
+    /// cadena.json manipulada) se RECHAZA, no hace panic al indexar el &str.
+    #[test]
+    fn un_hash_no_ascii_se_rechaza_sin_panic() {
+        let raro = format!("é{}", "a".repeat(62)); // 2 + 62 = 64 bytes, no ASCII
+        assert_eq!(raro.len(), 64);
+        assert!(de_hex32(&raro).is_none());
     }
 
     #[test]

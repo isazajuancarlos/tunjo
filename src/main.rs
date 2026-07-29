@@ -332,6 +332,18 @@ fn ahora_utc() -> String {
     chrono::Utc::now().to_rfc3339_opts(chrono::SecondsFormat::Secs, true)
 }
 
+/// Huella corta (SHA-256, 8 bytes en hex) de una clave pública. La clave triple
+/// ocupa 46 KB en base64 y nadie coteja eso a ojo; la huella sí. Es el mismo
+/// criterio que el acta legible.
+fn huella_clave(clave_b64: &str) -> String {
+    use sha2::{Digest, Sha256};
+    Sha256::digest(clave_b64.as_bytes())
+        .iter()
+        .take(8)
+        .map(|b| format!("{b:02x}"))
+        .collect()
+}
+
 const RELOJ_SIN_VERIFICAR: &str = "NO VERIFICADO contra fuente externa de tiempo";
 
 fn orden_custodia(accion: Custodia) -> Result<bool> {
@@ -407,21 +419,35 @@ fn orden_custodia(accion: Custodia) -> Result<bool> {
             let texto = std::fs::read_to_string(&ruta)
                 .with_context(|| format!("leyendo la cadena {}", ruta.display()))?;
             let cadena = custodia::desde_json(&texto)?;
-            let bytes = match &acta {
-                Some(p) => Some(leer_acta(p)?.bytes_canonicos()),
+            // El acta se ata por CONTENIDO (sus bytes canónicos) y por AUTOR (la
+            // clave pública de su perito): las dos viven mientras dura el match.
+            let acta_cargada = match &acta {
+                Some(p) => Some(leer_acta(p)?),
                 None => None,
             };
-            match custodia::verificar(&cadena, bytes.as_deref())? {
+            let bytes = acta_cargada.as_ref().map(|a| a.bytes_canonicos());
+            let ancla = match (&bytes, &acta_cargada) {
+                (Some(b), Some(a)) => Some(custodia::Ancla {
+                    bytes_canonicos: b,
+                    clave_publica: &a.perito.clave_publica,
+                }),
+                _ => None,
+            };
+            match custodia::verificar(&cadena, ancla)? {
                 custodia::Veredicto::Intacta => {
                     println!(
                         "✔ Cadena de custodia ÍNTEGRA: {} eslabones, firmas triple válidas, sin saltos ni reordenamientos.",
                         cadena.eslabones.len()
                     );
                     if acta.is_some() {
-                        println!("  Y corresponde al acta indicada.");
+                        println!("  Y corresponde al acta, firmada por su mismo perito.");
                     } else {
-                        println!("  (Sin --acta no se comprobó a qué acta pertenece.)");
+                        println!("  (Sin --acta no se comprobó a qué acta pertenece ni quién la firmó.)");
                     }
+                    println!(
+                        "  Huella de la clave de la cadena (cotéjala con la del perito): {}",
+                        huella_clave(&cadena.clave_publica)
+                    );
                     Ok(true)
                 }
                 custodia::Veredicto::Rota { secuencia, motivo } => {
@@ -430,9 +456,23 @@ fn orden_custodia(accion: Custodia) -> Result<bool> {
                 }
                 custodia::Veredicto::ActaNoCorresponde { esperado, encontrado } => {
                     println!(
-                        "✗ La cadena es íntegra pero es de OTRA acta.\n  \
+                        "✗ La cadena es íntegra pero ancla OTRA acta.\n  \
                          esperado (acta dada): {esperado}\n  ancla de la cadena:   {encontrado}"
                     );
+                    Ok(false)
+                }
+                custodia::Veredicto::FirmanteAjeno { esperado, encontrado } => {
+                    println!(
+                        "✗ La cadena es íntegra pero la firmó una clave que NO es la del perito del acta:\n  \
+                         no la levantó quien selló la evidencia.\n  \
+                         huella perito del acta: {}\n  huella firmante cadena: {}",
+                        huella_clave(&esperado),
+                        huella_clave(&encontrado)
+                    );
+                    Ok(false)
+                }
+                custodia::Veredicto::SinGenesis => {
+                    println!("✗ La cadena no tiene evento génesis: no atestigua ninguna custodia sobre el acta.");
                     Ok(false)
                 }
             }
