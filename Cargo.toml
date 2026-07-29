@@ -24,6 +24,9 @@ homepage = "https://github.com/isazajuancarlos/tunjo"
 #     [patch.crates-io]
 #     quipu = { path = "../decod" }
 quipu = { version = "0.10", features = ["slh"] }
+# La cadena de custodia usa el encadenamiento de guaca, firmado en TRIPLE (el
+# firmante lo pone tunjo, que ya tiene SLH-DSA). guaca aporta solo la cadena.
+guaca = { git = "https://github.com/isazajuancarlos/guaca", tag = "v0.3.0" }
 sha2 = "0.11"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
