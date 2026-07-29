@@ -1,0 +1,27 @@
+# SPDX-License-Identifier: AGPL-3.0-or-later
+# CI de tunjo: test + clippy en release. Es una herramienta de peritaje sobre
+# Quipu; que se rompa no debe descubrirse cuando haga falta sellar una prueba.
+# En RELEASE a propósito: SLH-DSA sin optimizar es tan lento que la suite lo
+# confunde con un interbloqueo (lección del commit 0b24c25).
+name: CI
+
+on:
+  push:
+    branches: ["**"]
+  pull_request:
+    branches: [main]
+
+jobs:
+  rust:
+    name: test + clippy (release)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy
+      - uses: Swatinem/rust-cache@v2
+      - name: clippy
+        run: cargo clippy --all-targets --release -- -D warnings
+      - name: test
+        run: cargo test --release

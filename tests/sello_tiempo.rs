@@ -40,7 +40,7 @@ fn lee_un_token_real_de_una_autoridad_real() {
 }
 
 #[test]
-fn un_token_valido_sobre_OTRO_dato_se_rechaza() {
+fn un_token_valido_sobre_otro_dato_se_rechaza() {
     // El fallo más grave posible: aceptar un sello auténtico que no sella lo
     // nuestro. El token es legítimo; el hash, no el suyo.
     let mut otro = HASH_SELLADO;

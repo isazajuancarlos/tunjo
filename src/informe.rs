@@ -65,7 +65,7 @@ pub fn markdown(acta: &Acta) -> String {
     m.push_str(&format!("- **Contraste del reloj:** {}\n\n", acta.adquisicion.reloj.verificacion));
 
     m.push_str("## 3. Resumen\n\n");
-    m.push_str(&format!("| Elementos | Leídos | Ilegibles | Bytes |\n|---|---|---|---|\n"));
+    m.push_str("| Elementos | Leídos | Ilegibles | Bytes |\n|---|---|---|---|\n");
     m.push_str(&format!(
         "| {} | {} | {} | {} |\n\n",
         acta.elementos.len(),

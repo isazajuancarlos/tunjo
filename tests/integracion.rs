@@ -395,41 +395,47 @@ fn sellado_concurrente_sin_interbloqueo() {
 // ===========================================================================
 // HUELLAS QUE NO SE VERIFICAN LEYENDO BYTES
 //
-// Una hoja de glifos de Quipu se reimprime, se escanea y se fotografía: sus
-// BYTES cambian en cada viaje mientras el contenido que transporta es el
-// mismo. Sellar el archivo haría que el control fallara SIEMPRE, y un control
-// que falla siempre es peor que no tenerlo: enseña a ignorarlo.
+// No todo lo que se sella se comprueba releyendo sus bytes: algo puede sellarse
+// por una huella que se recompute con OTRA herramienta. Recomputar el SHA-256
+// del archivo en ese caso daría ALTERADO SIEMPRE, y un control que falla
+// siempre es peor que no tenerlo: enseña a ignorarlo.
 //
 // Por eso el elemento lleva `metodo_huella`, y por eso `contrastar` no puede
-// tratarlo como si fuera un archivo normal.
+// tratar un método que no conoce como si fuera un archivo normal: lo declara
+// NO VERIFICABLE nombrándolo, en vez de mentir.
 // ===========================================================================
 
-use tunjo::acta::{Elemento, HUELLA_PORTADOR_QUIPU};
+use tunjo::acta::Elemento;
+
+/// Un método de huella que `contrastar` no sabe recomputar (no son los bytes
+/// del archivo). Genérico a propósito: prueba el mecanismo, no un método
+/// concreto.
+const METODO_DESCONOCIDO: &str = "sha256-de-otra-representacion-v1";
 
 /// Un elemento sellado con otro método, apuntando a un archivo que SÍ existe.
-fn elemento_portador(ruta: &str) -> Elemento {
+fn elemento_otro_metodo(ruta: &str) -> Elemento {
     Elemento {
         ruta: ruta.into(),
         tipo: "archivo".into(),
         bytes: 0,
-        // La huella NO es el SHA-256 del archivo: viene de reconocer los
-        // glifos y corregir el daño.
+        // La huella NO es el SHA-256 del archivo: se recompone con otra
+        // herramienta.
         sha256: "0".repeat(64),
         modificado_utc: String::new(),
         estado: "leido".into(),
-        metodo_huella: HUELLA_PORTADOR_QUIPU.into(),
+        metodo_huella: METODO_DESCONOCIDO.into(),
     }
 }
 
 #[test]
-fn una_huella_de_portador_no_se_reporta_como_alterada() {
+fn una_huella_de_otro_metodo_no_se_reporta_como_alterada() {
     // ES LA PRUEBA QUE JUSTIFICA EL CAMPO. Sin ella, `contrastar` recomputaría
-    // el SHA-256 del PNG, no cuadraría con la huella del portador, y daría
-    // ALTERADO en cada verificación aunque todo estuviera perfecto.
+    // el SHA-256 del archivo, no cuadraría con la huella de otra herramienta, y
+    // daría ALTERADO en cada verificación aunque todo estuviera perfecto.
     let dir = tempfile::tempdir().unwrap();
     fs::write(dir.path().join("secreto.png"), b"unos bytes cualesquiera").unwrap();
 
-    let d = recoleccion::contrastar(&[elemento_portador("secreto.png")], dir.path()).unwrap();
+    let d = recoleccion::contrastar(&[elemento_otro_metodo("secreto.png")], dir.path()).unwrap();
 
     assert!(
         !d.iter().any(|x| matches!(x, Discrepancia::Alterado { .. })),
@@ -449,7 +455,7 @@ fn el_motivo_dice_que_metodo_hace_falta() {
     let dir = tempfile::tempdir().unwrap();
     fs::write(dir.path().join("secreto.png"), b"x").unwrap();
 
-    let d = recoleccion::contrastar(&[elemento_portador("secreto.png")], dir.path()).unwrap();
+    let d = recoleccion::contrastar(&[elemento_otro_metodo("secreto.png")], dir.path()).unwrap();
     let motivo = d
         .iter()
         .find_map(|x| match x {
@@ -459,7 +465,7 @@ fn el_motivo_dice_que_metodo_hace_falta() {
         .expect("debía haber una NoVerificable");
 
     assert!(
-        motivo.contains(HUELLA_PORTADOR_QUIPU),
+        motivo.contains(METODO_DESCONOCIDO),
         "el motivo no nombra el método: «{motivo}»",
     );
 }
@@ -469,10 +475,10 @@ fn si_el_archivo_no_esta_sigue_siendo_ausente() {
     // El método distinto no puede volverse una excusa para no notar que la
     // pieza desapareció. Eso sí se comprueba sin leer bytes.
     let dir = tempfile::tempdir().unwrap();
-    let d = recoleccion::contrastar(&[elemento_portador("no_existe.png")], dir.path()).unwrap();
+    let d = recoleccion::contrastar(&[elemento_otro_metodo("no_existe.png")], dir.path()).unwrap();
     assert!(
         d.iter().any(|x| matches!(x, Discrepancia::Ausente { .. })),
-        "un portador ausente pasó inadvertido: {d:?}",
+        "un elemento ausente pasó inadvertido: {d:?}",
     );
 }
 
