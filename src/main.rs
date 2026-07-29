@@ -10,6 +10,7 @@ use base64::{Engine, engine::general_purpose::STANDARD};
 use clap::{Parser, Subcommand};
 
 use tunjo::acta::{Acta, Elemento};
+use tunjo::custodia::{self, Evento};
 use tunjo::{clave, informe, recoleccion, sellado};
 
 #[derive(Parser)]
@@ -85,6 +86,67 @@ enum Orden {
         /// Dónde escribirla. Si se omite, sale por pantalla.
         #[arg(long)]
         salida: Option<PathBuf>,
+    },
+    /// Cadena de custodia: la secuencia de eventos sobre una evidencia sellada.
+    Custodia {
+        #[command(subcommand)]
+        accion: Custodia,
+    },
+}
+
+#[derive(Subcommand)]
+enum Custodia {
+    /// Inicia la cadena sobre un acta ya sellada (evento de adquisición).
+    Iniciar {
+        #[arg(long, default_value = "acta.json")]
+        acta: PathBuf,
+        #[arg(long, default_value = "perito.clave")]
+        clave: PathBuf,
+        #[arg(long, default_value = "cadena.json")]
+        salida: PathBuf,
+        /// Quién recogió la evidencia.
+        #[arg(long)]
+        actor: String,
+        /// Cédula o tarjeta profesional del actor.
+        #[arg(long)]
+        identificacion: String,
+        #[arg(long, default_value = "perito")]
+        rol: String,
+        /// Cómo se contrastó el reloj. Si se omite, queda NO VERIFICADO.
+        #[arg(long)]
+        reloj: Option<String>,
+        /// Qué se recogió y cómo.
+        #[arg(long)]
+        descripcion: String,
+    },
+    /// Añade un evento (transferencia, análisis, almacenamiento…) a la cadena.
+    Evento {
+        #[arg(long, default_value = "cadena.json")]
+        cadena: PathBuf,
+        #[arg(long, default_value = "perito.clave")]
+        clave: PathBuf,
+        /// `transferencia`, `analisis`, `almacenamiento`, `presentacion`…
+        #[arg(long)]
+        tipo: String,
+        /// Quién ejecuta el evento.
+        #[arg(long)]
+        actor: String,
+        #[arg(long)]
+        identificacion: String,
+        #[arg(long)]
+        rol: String,
+        #[arg(long)]
+        reloj: Option<String>,
+        #[arg(long)]
+        descripcion: String,
+    },
+    /// Verifica la cadena (eslabones, firmas triple, secuencia) y, con --acta, el ancla.
+    Verificar {
+        #[arg(long, default_value = "cadena.json")]
+        cadena: PathBuf,
+        /// Comprueba además que la cadena corresponde a esta acta.
+        #[arg(long)]
+        acta: Option<PathBuf>,
     },
 }
 
@@ -266,6 +328,118 @@ fn orden_acta(ruta: PathBuf, salida: Option<PathBuf>) -> Result<()> {
     Ok(())
 }
 
+fn ahora_utc() -> String {
+    chrono::Utc::now().to_rfc3339_opts(chrono::SecondsFormat::Secs, true)
+}
+
+const RELOJ_SIN_VERIFICAR: &str = "NO VERIFICADO contra fuente externa de tiempo";
+
+fn orden_custodia(accion: Custodia) -> Result<bool> {
+    match accion {
+        Custodia::Iniciar {
+            acta,
+            clave,
+            salida,
+            actor,
+            identificacion,
+            rol,
+            reloj,
+            descripcion,
+        } => {
+            if salida.exists() {
+                bail!(
+                    "ya existe {} — una cadena de custodia no se sobrescribe; elige otra salida",
+                    salida.display()
+                );
+            }
+            let a = leer_acta(&acta)?;
+            let sk = clave::cargar(&clave, &pedir_contrasena(false)?)?;
+            let evento = Evento {
+                tipo: "adquisicion".into(),
+                actor,
+                identificacion,
+                rol,
+                fecha_utc: ahora_utc(),
+                reloj: reloj.unwrap_or_else(|| RELOJ_SIN_VERIFICAR.into()),
+                descripcion,
+            };
+            let cadena = custodia::iniciar(&a.bytes_canonicos(), evento, &sk);
+            std::fs::write(&salida, serde_json::to_vec_pretty(&cadena)?)?;
+            println!(
+                "Cadena de custodia iniciada en {} (anclada al acta {}).",
+                salida.display(),
+                acta.display()
+            );
+            Ok(true)
+        }
+        Custodia::Evento {
+            cadena: ruta,
+            clave,
+            tipo,
+            actor,
+            identificacion,
+            rol,
+            reloj,
+            descripcion,
+        } => {
+            let texto = std::fs::read_to_string(&ruta)
+                .with_context(|| format!("leyendo la cadena {}", ruta.display()))?;
+            let mut cadena = custodia::desde_json(&texto)?;
+            let sk = clave::cargar(&clave, &pedir_contrasena(false)?)?;
+            let evento = Evento {
+                tipo,
+                actor,
+                identificacion,
+                rol,
+                fecha_utc: ahora_utc(),
+                reloj: reloj.unwrap_or_else(|| RELOJ_SIN_VERIFICAR.into()),
+                descripcion,
+            };
+            custodia::agregar(&mut cadena, evento, &sk)?;
+            std::fs::write(&ruta, serde_json::to_vec_pretty(&cadena)?)?;
+            println!(
+                "Evento añadido: la cadena tiene ahora {} eslabones.",
+                cadena.eslabones.len()
+            );
+            Ok(true)
+        }
+        Custodia::Verificar { cadena: ruta, acta } => {
+            let texto = std::fs::read_to_string(&ruta)
+                .with_context(|| format!("leyendo la cadena {}", ruta.display()))?;
+            let cadena = custodia::desde_json(&texto)?;
+            let bytes = match &acta {
+                Some(p) => Some(leer_acta(p)?.bytes_canonicos()),
+                None => None,
+            };
+            match custodia::verificar(&cadena, bytes.as_deref())? {
+                custodia::Veredicto::Intacta => {
+                    println!(
+                        "✔ Cadena de custodia ÍNTEGRA: {} eslabones, firmas triple válidas, sin saltos ni reordenamientos.",
+                        cadena.eslabones.len()
+                    );
+                    if acta.is_some() {
+                        println!("  Y corresponde al acta indicada.");
+                    } else {
+                        println!("  (Sin --acta no se comprobó a qué acta pertenece.)");
+                    }
+                    Ok(true)
+                }
+                custodia::Veredicto::Rota { secuencia, motivo } => {
+                    println!("✗ Cadena ROTA en el eslabón {secuencia}: {motivo}.");
+                    Ok(false)
+                }
+                custodia::Veredicto::ActaNoCorresponde { esperado, encontrado } => {
+                    println!(
+                        "✗ La cadena es íntegra pero es de OTRA acta.\n  \
+                         esperado (acta dada): {esperado}\n  ancla de la cadena:   {encontrado}"
+                    );
+                    Ok(false)
+                }
+            }
+        }
+    }
+}
+
 fn main() -> ExitCode {
     let cli = Cli::parse();
     let resultado = match cli.orden {
@@ -298,6 +472,7 @@ fn main() -> ExitCode {
         .map(|_| true),
         Orden::Verificar { acta, origen } => orden_verificar(acta, origen),
         Orden::Acta { acta, salida } => orden_acta(acta, salida).map(|_| true),
+        Orden::Custodia { accion } => orden_custodia(accion),
     };
 
     match resultado {

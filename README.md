@@ -87,6 +87,36 @@ El acta legible lleva las **huellas** de la clave y de la firma, no sus valores
 completos: la firma triple ocupa 46 KB en base64 y nadie coteja eso en papel. La
 verificación se hace sobre el JSON; el Markdown es para leer.
 
+## Cadena de custodia: la secuencia, no solo el instante
+
+El acta prueba un **instante**: «esto existía en T0, con esta raíz Merkle,
+firmado». Pero *cadena de custodia* significa la secuencia **ininterrumpida** de
+quién tuvo la evidencia y qué hizo. Eso va en un artefacto aparte
+(`cadena.json`), **encadenado por hash y firmado en triple**: cada evento apunta
+al anterior, así que **borrar o reordenar rompe la cadena**, no solo alterarla.
+El acta no se toca; la cadena se ancla a ella por el SHA-256 de sus bytes
+canónicos, firmado en el evento génesis.
+
+```bash
+# Iniciar la cadena sobre un acta ya sellada (evento de adquisición).
+tunjo custodia iniciar --acta acta.json --clave perito.clave \
+  --actor "Juan Carlos Isaza Arenas" --identificacion "CC 1.234.567" \
+  --descripcion "Copia lógica recogida en el domicilio del cliente"
+
+# Añadir cada eslabón: transferencia, análisis, almacenamiento, presentación…
+tunjo custodia evento --cadena cadena.json --clave perito.clave \
+  --tipo transferencia --rol receptor \
+  --actor "Laboratorio Forense X" --identificacion "NIT 900.000" \
+  --descripcion "Entregada al laboratorio para extracción"
+
+# Verificar la cadena entera (eslabones, firmas triple, secuencia) y, con
+# --acta, que corresponde a esa evidencia. La verifica cualquiera.
+tunjo custodia verificar --cadena cadena.json --acta acta.json
+```
+
+Va firmada al **mismo nivel que el acta** (Ed25519 + ML-DSA-87 + SLH-DSA): la
+custodia no puede ser el eslabón criptográficamente débil de la prueba.
+
 ## Fecha cierta: `--sello`
 
 Sin sello de tiempo, un acta prueba **orden relativo**: la hora la pone el reloj
