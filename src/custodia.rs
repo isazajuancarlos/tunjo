@@ -27,6 +27,9 @@ use quipu::pqsign::{TripleSigningKey, TripleVerifyingKey};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use sha2::{Digest, Sha256};
+use x509_cert::Certificate;
+
+use crate::firma_cms::{self, Confianza};
 
 /// Marca de formato de la cadena. Va DENTRO del archivo para que un lector futuro
 /// sepa qué está leyendo y con qué reglas verificarlo.
@@ -139,15 +142,22 @@ pub enum EstadoSello {
     /// No hay sello: la cadena prueba orden relativo, no fecha cierta ni
     /// completitud. Una truncación al final sería indetectable.
     Ausente,
-    /// El sello es válido y certifica el eslabón que HOY es el último: hay fecha
-    /// cierta y la completitud está probada hasta aquí.
-    Vigente { fecha_utc: String, secuencia: u64 },
+    /// El sello es válido y certifica el eslabón que HOY es el último.
+    ///
+    /// Que haya FECHA CIERTA depende de `confianza`: solo cuando el certificado
+    /// de la autoridad encadena a un ancla que aportó el verificador se puede
+    /// decir de quién viene la fecha. Sin ancla la firma es válida pero anónima,
+    /// y entonces esto NO prueba completitud — un autofirmado pasa igual.
+    Vigente { fecha_utc: String, secuencia: u64, confianza: Confianza },
     /// El sello es válido pero certifica un eslabón ANTERIOR al último: se
     /// añadieron eventos después de sellar, aún sin sellar. Es legítimo.
-    CubrePrefijo { fecha_utc: String, sellado: u64, ultimo: u64 },
+    CubrePrefijo { fecha_utc: String, sellado: u64, ultimo: u64, confianza: Confianza },
     /// El sello certifica un eslabón MÁS ALLÁ del último actual: la cadena se
     /// TRUNCÓ tras sellarse. Es justo lo que el sello existe para delatar.
-    Truncada { fecha_utc: String, sellado: u64, ultimo: u64 },
+    ///
+    /// Se delata igual con sello anclado o sin anclar: aquí la cadena se
+    /// contradice a sí misma, y eso no depende de en quién se confíe.
+    Truncada { fecha_utc: String, sellado: u64, ultimo: u64, confianza: Confianza },
     /// El token no valida contra el hash que dice sellar, o el eslabón sellado no
     /// coincide con el de esa posición en la cadena: sello corrupto o cambiado.
     Invalido { motivo: String },
@@ -336,6 +346,17 @@ pub fn sellar_final(cadena: &mut Cadena, url: &str) -> Result<crate::sello_tiemp
     // Se verifica el token recién recibido contra el mismo hash: si la autoridad
     // devolvió algo que no sella lo que se pidió, se falla aquí y no se guarda.
     let datos = crate::sello_tiempo::verificar(&token, &hash)?;
+    // Y se exige que venga FIRMADO, aquí y no solo al verificar después: guardar
+    // en la cadena un token que no acredita nada sería meter en el expediente una
+    // prueba vacía que solo se descubre el día que alguien la mire de cerca. Las
+    // anclas se comprueban al verificar, no al sellar: quien sella no decide en
+    // quién debe confiar quien recibe.
+    firma_cms::verificar_firma(&token, &datos.fecha_utc, &[]).map_err(|e| {
+        anyhow!(
+            "la autoridad {url} devolvió un token que NO está correctamente firmado \
+             ({e}). No se guarda en la cadena."
+        )
+    })?;
 
     cadena.sello_final = Some(SelloCadena {
         secuencia: ultimo.secuencia,
@@ -349,7 +370,12 @@ pub fn sellar_final(cadena: &mut Cadena, url: &str) -> Result<crate::sello_tiemp
 /// la cadena actual. Es la parte SIN criptografía: decide, comparando secuencias y
 /// hashes, si el sello cubre el último eslabón, un prefijo, o si la cadena fue
 /// truncada tras sellarse. Se prueba sola, sin red.
-fn situar(sello: &SelloCadena, eslabones: &[Eslabon], fecha_utc: String) -> EstadoSello {
+fn situar(
+    sello: &SelloCadena,
+    eslabones: &[Eslabon],
+    fecha_utc: String,
+    confianza: Confianza,
+) -> EstadoSello {
     let Some(ultimo) = eslabones.last() else {
         return EstadoSello::Invalido { motivo: "sello sobre una cadena sin eslabones".into() };
     };
@@ -359,18 +385,20 @@ fn situar(sello: &SelloCadena, eslabones: &[Eslabon], fecha_utc: String) -> Esta
             fecha_utc,
             sellado: sello.secuencia,
             ultimo: ultimo.secuencia,
+            confianza,
         };
     }
     // El eslabón sellado tiene que existir en la cadena y con EL MISMO hash.
     match eslabones.iter().find(|e| e.secuencia == sello.secuencia) {
         Some(e) if e.hash == sello.hash_eslabon => {
             if sello.secuencia == ultimo.secuencia {
-                EstadoSello::Vigente { fecha_utc, secuencia: sello.secuencia }
+                EstadoSello::Vigente { fecha_utc, secuencia: sello.secuencia, confianza }
             } else {
                 EstadoSello::CubrePrefijo {
                     fecha_utc,
                     sellado: sello.secuencia,
                     ultimo: ultimo.secuencia,
+                    confianza,
                 }
             }
         }
@@ -385,7 +413,13 @@ fn situar(sello: &SelloCadena, eslabones: &[Eslabon], fecha_utc: String) -> Esta
 /// Falla ruidosamente solo cuando no hay nada que juzgar (sin sello -> `Ausente`);
 /// un token inválido devuelve `Invalido`, no un `Err`, para que el llamante lo
 /// reporte junto al resto.
-pub fn estado_sello(cadena: &Cadena) -> EstadoSello {
+/// `anclas` son los certificados en los que el verificador ha decidido confiar,
+/// normalmente la raíz de la autoridad de sellado. Con la lista vacía la firma se
+/// comprueba igual —y un token forjado se rechaza igual— pero el estado que sale
+/// llevará [`Confianza::SinAnclar`], y quien lo reporte no puede afirmar de quién
+/// viene la fecha. No hay almacén de confianza por defecto a propósito: elegir en
+/// quién confía el verificador sería inventarse justo el dato que se le pide.
+pub fn estado_sello(cadena: &Cadena, anclas: &[Certificate]) -> EstadoSello {
     let Some(sello) = &cadena.sello_final else {
         return EstadoSello::Ausente;
     };
@@ -396,9 +430,17 @@ pub fn estado_sello(cadena: &Cadena) -> EstadoSello {
         Ok(t) => t,
         Err(_) => return EstadoSello::Invalido { motivo: "el token del sello no es base64".into() },
     };
-    match crate::sello_tiempo::verificar(&token, &hash32) {
-        Ok(datos) => situar(sello, &cadena.eslabones, datos.fecha_utc),
-        Err(e) => EstadoSello::Invalido { motivo: format!("el token no valida: {e}") },
+    // Primero QUÉ sella (el messageImprint), después QUIÉN lo firmó. El segundo
+    // paso es el que faltaba hasta el 2026-07-30: sin él, un `SignedData` con
+    // `signer_infos` vacío —DER válido, sin clave ni certificado— pasaba por
+    // sello legítimo y sostenía el veredicto de completitud.
+    let datos = match crate::sello_tiempo::verificar(&token, &hash32) {
+        Ok(d) => d,
+        Err(e) => return EstadoSello::Invalido { motivo: format!("el token no valida: {e}") },
+    };
+    match firma_cms::verificar_firma(&token, &datos.fecha_utc, anclas) {
+        Ok(confianza) => situar(sello, &cadena.eslabones, datos.fecha_utc, confianza),
+        Err(e) => EstadoSello::Invalido { motivo: format!("la firma del sello no vale: {e}") },
     }
 }
 
@@ -611,6 +653,13 @@ mod pruebas {
     // válido) y los eslabones, decide si cubre el tip, un prefijo, o si hubo
     // truncación. Es donde vive el valor de #196, así que se prueba directa.
 
+    /// Confianza de relleno para las pruebas de `situar`, que es la parte SIN
+    /// criptografía: situar no mira la firma, así que aquí da igual cuál sea.
+    /// El que la firma se compruebe de verdad lo prueba `tests/firma_cms.rs`.
+    fn confianza_de_prueba() -> Confianza {
+        Confianza::SinAnclar { autoridad: "CN=Autoridad de prueba".into() }
+    }
+
     fn sello_de(eslabon: &Eslabon) -> SelloCadena {
         SelloCadena {
             secuencia: eslabon.secuencia,
@@ -624,8 +673,12 @@ mod pruebas {
         let (c, _) = cadena_de_tres(b"acta");
         let sello = sello_de(c.eslabones.last().unwrap());
         assert_eq!(
-            situar(&sello, &c.eslabones, "2026-07-29T15:00:00Z".into()),
-            EstadoSello::Vigente { fecha_utc: "2026-07-29T15:00:00Z".into(), secuencia: 2 }
+            situar(&sello, &c.eslabones, "2026-07-29T15:00:00Z".into(), confianza_de_prueba()),
+            EstadoSello::Vigente {
+                fecha_utc: "2026-07-29T15:00:00Z".into(),
+                secuencia: 2,
+                confianza: confianza_de_prueba(),
+            }
         );
     }
 
@@ -635,8 +688,13 @@ mod pruebas {
         let (c, _) = cadena_de_tres(b"acta");
         let sello = sello_de(&c.eslabones[0]);
         assert_eq!(
-            situar(&sello, &c.eslabones, "T".into()),
-            EstadoSello::CubrePrefijo { fecha_utc: "T".into(), sellado: 0, ultimo: 2 }
+            situar(&sello, &c.eslabones, "T".into(), confianza_de_prueba()),
+            EstadoSello::CubrePrefijo {
+                fecha_utc: "T".into(),
+                sellado: 0,
+                ultimo: 2,
+                confianza: confianza_de_prueba(),
+            }
         );
     }
 
@@ -648,8 +706,13 @@ mod pruebas {
         let sello = sello_de(&c.eslabones[2]);
         c.eslabones.truncate(1); // queda solo el eslabón 0
         assert_eq!(
-            situar(&sello, &c.eslabones, "T".into()),
-            EstadoSello::Truncada { fecha_utc: "T".into(), sellado: 2, ultimo: 0 }
+            situar(&sello, &c.eslabones, "T".into(), confianza_de_prueba()),
+            EstadoSello::Truncada {
+                fecha_utc: "T".into(),
+                sellado: 2,
+                ultimo: 0,
+                confianza: confianza_de_prueba(),
+            }
         );
     }
 
@@ -661,7 +724,7 @@ mod pruebas {
         let mut sello = sello_de(c.eslabones.last().unwrap());
         sello.hash_eslabon = sha256_hex(b"otro eslabon");
         assert!(matches!(
-            situar(&sello, &c.eslabones, "T".into()),
+            situar(&sello, &c.eslabones, "T".into(), confianza_de_prueba()),
             EstadoSello::Invalido { .. }
         ));
     }
@@ -669,7 +732,7 @@ mod pruebas {
     #[test]
     fn sin_sello_el_estado_es_ausente() {
         let (c, _) = cadena_de_tres(b"acta");
-        assert_eq!(estado_sello(&c), EstadoSello::Ausente);
+        assert_eq!(estado_sello(&c, &[]), EstadoSello::Ausente);
     }
 
     #[test]
@@ -682,7 +745,7 @@ mod pruebas {
             hash_eslabon: c.eslabones[2].hash.clone(),
             token_der_b64: "esto no es base64 válido !!!".into(),
         });
-        assert!(matches!(estado_sello(&c), EstadoSello::Invalido { .. }));
+        assert!(matches!(estado_sello(&c, &[]), EstadoSello::Invalido { .. }));
     }
 
     #[test]
@@ -704,7 +767,7 @@ mod pruebas {
         let mut v: Value = serde_json::from_str(&serde_json::to_string(&vieja).unwrap()).unwrap();
         v.as_object_mut().unwrap().remove("sello_final");
         let releida = desde_json(&v.to_string()).unwrap();
-        assert_eq!(estado_sello(&releida), EstadoSello::Ausente);
+        assert_eq!(estado_sello(&releida, &[]), EstadoSello::Ausente);
     }
 
     #[test]

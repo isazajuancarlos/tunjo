@@ -156,6 +156,14 @@ enum Custodia {
         /// Comprueba además que la cadena corresponde a esta acta.
         #[arg(long)]
         acta: Option<PathBuf>,
+        /// PEM con el certificado —o los certificados— de la autoridad de sellado
+        /// en los que decides confiar, normalmente su raíz. Sin esto la firma del
+        /// sello se comprueba igual, pero su IDENTIDAD no queda acreditada: un
+        /// autofirmado con el uso de sellado pasa la comprobación criptográfica.
+        /// No hay lista por defecto a propósito: en quién confías no lo decide
+        /// esta herramienta.
+        #[arg(long = "tsa-ca")]
+        tsa_ca: Option<PathBuf>,
     },
 }
 
@@ -441,10 +449,22 @@ fn orden_custodia(accion: Custodia) -> Result<bool> {
             );
             Ok(true)
         }
-        Custodia::Verificar { cadena: ruta, acta } => {
+        Custodia::Verificar { cadena: ruta, acta, tsa_ca } => {
             let texto = std::fs::read_to_string(&ruta)
                 .with_context(|| format!("leyendo la cadena {}", ruta.display()))?;
             let cadena = custodia::desde_json(&texto)?;
+            // Si se pide un ancla y el archivo no sirve, se falla aquí: quien pasó
+            // `--tsa-ca` está EXIGIENDO ese control, y seguir sin él en silencio
+            // daría por anclado lo que no lo está.
+            let anclas = match &tsa_ca {
+                Some(p) => {
+                    let pem = std::fs::read_to_string(p)
+                        .with_context(|| format!("leyendo las anclas {}", p.display()))?;
+                    tunjo::firma_cms::anclas_desde_pem(&pem)
+                        .with_context(|| format!("las anclas de {}", p.display()))?
+                }
+                None => Vec::new(),
+            };
             // El acta se ata por CONTENIDO (sus bytes canónicos) y por AUTOR (la
             // clave pública de su perito): las dos viven mientras dura el match.
             let acta_cargada = match &acta {
@@ -476,7 +496,7 @@ fn orden_custodia(accion: Custodia) -> Result<bool> {
                     );
                     // La integridad prueba un PREFIJO; el sello de tiempo dice si
                     // ese prefijo es TODO lo que hubo. Sin sello no se puede saber.
-                    match custodia::estado_sello(&cadena) {
+                    match custodia::estado_sello(&cadena, &anclas) {
                         custodia::EstadoSello::Ausente => {
                             println!(
                                 "  Sin sello de tiempo: prueba el orden relativo, no la fecha ni que\n  \
@@ -484,25 +504,55 @@ fn orden_custodia(accion: Custodia) -> Result<bool> {
                             );
                             Ok(true)
                         }
-                        custodia::EstadoSello::Vigente { fecha_utc, secuencia } => {
+                        custodia::EstadoSello::Vigente { fecha_utc, secuencia, confianza } => {
+                            if confianza.acredita_autoridad() {
+                                println!(
+                                    "  ✔ Sellada en el tiempo (RFC 3161) sobre el último eslabón ({secuencia}):\n  \
+                                     fecha cierta {fecha_utc}, acreditada por {}.\n  \
+                                     La cadena está completa hasta aquí.",
+                                    confianza.autoridad()
+                                );
+                            } else {
+                                // Sin ancla la firma es válida pero anónima, y NO se
+                                // afirma completitud: un autofirmado llega hasta aquí.
+                                println!(
+                                    "  ⚠ Sello sobre el último eslabón ({secuencia}) con firma válida de\n  \
+                                     «{}», fecha {fecha_utc} — pero SIN ANCLAR: no dijiste en qué\n  \
+                                     autoridad confías, así que esa identidad no está acreditada y de\n  \
+                                     esta cadena no se puede afirmar que esté completa.\n  \
+                                     Exígelo con `--tsa-ca <raíz.pem>`.",
+                                    confianza.autoridad()
+                                );
+                            }
+                            Ok(true)
+                        }
+                        custodia::EstadoSello::CubrePrefijo { fecha_utc, sellado, ultimo, confianza } => {
                             println!(
-                                "  ✔ Sellada en el tiempo (RFC 3161) sobre el último eslabón ({secuencia}):\n  \
-                                 fecha cierta {fecha_utc}. La cadena está completa hasta aquí."
+                                "  {} Sellada en el tiempo (RFC 3161) hasta el eslabón {sellado} ({fecha_utc});\n  \
+                                 los eslabones {}..{ultimo} se añadieron después y aún no están sellados.{}",
+                                if confianza.acredita_autoridad() { "✔" } else { "⚠" },
+                                sellado + 1,
+                                if confianza.acredita_autoridad() {
+                                    String::new()
+                                } else {
+                                    format!(
+                                        "\n  El sello lo firma «{}» y NO está anclado: esa identidad no\n  \
+                                         está acreditada. Exígelo con `--tsa-ca <raíz.pem>`.",
+                                        confianza.autoridad()
+                                    )
+                                }
                             );
                             Ok(true)
                         }
-                        custodia::EstadoSello::CubrePrefijo { fecha_utc, sellado, ultimo } => {
-                            println!(
-                                "  ✔ Sellada en el tiempo (RFC 3161) hasta el eslabón {sellado} ({fecha_utc});\n  \
-                                 los eslabones {}..{ultimo} se añadieron después y aún no están sellados.",
-                                sellado + 1
-                            );
-                            Ok(true)
-                        }
-                        custodia::EstadoSello::Truncada { fecha_utc, sellado, ultimo } => {
+                        custodia::EstadoSello::Truncada { fecha_utc, sellado, ultimo, confianza } => {
+                            // Se delata igual con sello anclado o sin anclar: la cadena
+                            // se contradice a sí misma, y eso no depende de la confianza.
                             println!(
                                 "  ✗ TRUNCADA: hay un sello de tiempo ({fecha_utc}) sobre el eslabón {sellado},\n  \
-                                 pero la cadena entregada llega solo al {ultimo}. Le quitaron eventos del final."
+                                 pero la cadena entregada llega solo al {ultimo}. Le quitaron eventos del final.\n  \
+                                 Sello firmado por «{}»{}.",
+                                confianza.autoridad(),
+                                if confianza.acredita_autoridad() { ", anclado" } else { ", SIN anclar" }
                             );
                             Ok(false)
                         }

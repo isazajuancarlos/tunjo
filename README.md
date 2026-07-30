@@ -44,10 +44,27 @@ penal—. Ver `MARCO_JURIDICO.md` §6.1.
   línea por línea, y con ella se cae el resto.
 - **No prueba el pasado.** Acredita desde el instante de la adquisición. Si el
   material ya venía alterado, el sello certifica fielmente material alterado.
-- **No valida la firma de la autoridad de sellado** contra su cadena de
-  certificados. Verifica que el sello corresponde a la firma del acta, guarda el
-  token íntegro, y remite a `openssl ts -verify` para lo demás. Está medido: hay
-  una prueba que fija ese límite y falla si algún día deja de ser cierto.
+- **No hace validación PKI completa** del certificado de la autoridad de sellado:
+  sin revocación (CRL/OCSP), sin restricciones de nombre, sin políticas. Para eso,
+  `openssl ts -verify`.
+
+  Lo que **sí** verifica desde el 2026-07-30: que el token lleve exactamente un
+  firmante, que su certificado viaje dentro y declare el uso `id-kp-timeStamping`,
+  que los atributos firmados aten la firma a ESE `TSTInfo`, que la **firma** sea
+  válida con esa clave, y que el certificado estuviera vigente en el instante que
+  sella. Y con `--tsa-ca <raíz.pem>`, que ese certificado **encadene** hasta una
+  autoridad en la que tú hayas dicho confiar.
+
+  **Sin `--tsa-ca` la identidad de la autoridad NO está acreditada** y la
+  herramienta lo dice en la salida: un certificado autofirmado con el uso de
+  sellado pasa toda la comprobación criptográfica. No hay lista de confianza por
+  defecto a propósito — en quién confías no lo decide esta herramienta.
+
+  Antes de esa fecha no se verificaba ninguna firma, y era un límite declarado y
+  honesto mientras el sello fuese informativo. Dejó de serlo cuando el sello pasó
+  a sostener un veredicto: un `SignedData` con la lista de firmantes vacía es DER
+  válido, así que cualquiera podía fabricar «fecha cierta» con un editor. Hay
+  pruebas que fijan cada uno de esos rechazos.
 - **No escribe nunca dentro del origen.** Solo lee.
 
 ## Uso
@@ -144,6 +161,19 @@ hueco frente a quien conserva el sello —el expediente, la contraparte—, no f
 a quien nunca supo que existió; por eso se comunica o se archiva en cada entrega.
 Que la cadena esté íntegra dice que no está *manipulada*; el sello es lo que
 además dice que está *completa* y desde cuándo.
+
+**Y el sello hay que anclarlo, o no dice de quién viene la fecha:**
+
+```bash
+tunjo custodia verificar --cadena cadena.json --acta acta.json \
+  --tsa-ca raiz-de-la-tsa.pem
+```
+
+Sin `--tsa-ca` la firma del token se comprueba —un token forjado se rechaza— pero
+la identidad de la autoridad no queda acreditada, y la salida lo advierte en vez
+de afirmar completitud. Con la raíz aportada, el veredicto sí puede decir quién
+fechó. La truncación se delata en los dos casos: ahí la cadena se contradice a sí
+misma, y eso no depende de en quién se confíe.
 
 ## Fecha cierta: `--sello`
 

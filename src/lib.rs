@@ -15,6 +15,7 @@
 pub mod acta;
 pub mod clave;
 pub mod custodia;
+pub mod firma_cms;
 pub mod informe;
 pub mod merkle;
 pub mod recoleccion;
