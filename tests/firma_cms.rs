@@ -222,11 +222,16 @@ fn un_ancla_con_el_nombre_correcto_y_la_clave_equivocada_no_ancla() {
 }
 
 #[test]
-fn un_ancla_ajena_a_la_cadena_no_ancla() {
-    // La hoja no emite a nadie: usarla como ancla de SU PROPIA cadena sí vale
-    // (es confiar en esa TSA concreta), pero la intermedia de otra jerarquía no.
-    // Aquí se usa la hoja como ancla de la cadena en la que ella misma firma,
-    // que es el caso legítimo, y se comprueba que ancla.
+fn confiar_en_el_certificado_que_firma_es_un_anclaje_valido() {
+    // El nombre anterior de esta prueba —«un ancla ajena a la cadena no ancla»—
+    // decía lo contrario de lo que el cuerpo comprueba, y un nombre que miente es
+    // peor que no tener la prueba: quien lea la lista cree cubierto un caso
+    // hostil que nadie estaba probando. Lo cazó la revisión.
+    //
+    // Lo que SÍ comprueba: confiar explícitamente en el certificado que firma es
+    // un anclaje legítimo (confianza en ESA TSA concreta), y no se le exige `cA`
+    // porque no está avalando a nadie más. El caso hostil —usar una hoja para
+    // AVALAR a otro certificado— lo cubren las pruebas de `exigir_puede_emitir`.
     let certs = certificados(&token());
     let hoja = certs
         .iter()

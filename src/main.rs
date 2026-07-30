@@ -92,6 +92,10 @@ enum Orden {
         /// Dónde escribirla. Si se omite, sale por pantalla.
         #[arg(long)]
         salida: Option<PathBuf>,
+        /// PEM de la autoridad de sellado en la que confías. Sin esto el documento
+        /// NO afirmará fecha cierta, aunque el sello lleve firma válida.
+        #[arg(long = "tsa-ca")]
+        tsa_ca: Option<PathBuf>,
     },
     /// Cadena de custodia: la secuencia de eventos sobre una evidencia sellada.
     Custodia {
@@ -367,15 +371,32 @@ fn orden_verificar(
     Ok(false)
 }
 
-fn orden_acta(ruta: PathBuf, salida: Option<PathBuf>) -> Result<()> {
+fn orden_acta(ruta: PathBuf, salida: Option<PathBuf>, tsa_ca: Option<PathBuf>) -> Result<bool> {
     let acta = leer_acta(&ruta)?;
-    // Se avisa, pero se genera igual: un acta sin firmar también hay que poder
-    // leerla para revisarla antes de sellar.
-    if let Err(e) = acta.verificar_sello() {
-        eprintln!("AVISO: el sello de esta acta no es válido ({e}).");
-        eprintln!("El documento se genera igualmente, pero NO acredita integridad.");
-    }
-    let md = informe::markdown(&acta);
+    // El documento se genera igual —hay que poder leer un acta para revisarla—,
+    // pero el veredicto viaja DENTRO de él y además decide el código de salida.
+    // Antes eran dos líneas en stderr: no llegan al juzgado, y cualquier
+    // redirección o `--salida` las perdía mientras el documento seguía afirmando
+    // integridad. Lo cazó la tercera revisión de seguridad.
+    let verificada = match acta.verificar_sello() {
+        Ok(()) => informe::ActaVerificada::Valida,
+        Err(e) => {
+            eprintln!("AVISO: la firma de esta acta NO verifica ({e}).");
+            informe::ActaVerificada::Invalida(e.to_string())
+        }
+    };
+    // El documento legible NO puede afirmar la fecha leyéndola del JSON: eso es un
+    // dato de quien entrega el acta. Se verifica aquí y se le pasa el VEREDICTO.
+    let anclas = leer_anclas(tsa_ca.as_deref())?;
+    let sello = match acta.verificar_sello_tiempo(&anclas) {
+        Ok(Some((datos, confianza))) => informe::SelloVerificado::Valido(datos, confianza),
+        Ok(None) => informe::SelloVerificado::Ausente,
+        Err(e) => {
+            eprintln!("AVISO: el sello de tiempo de esta acta NO es válido ({e}).");
+            informe::SelloVerificado::Invalido(e.to_string())
+        }
+    };
+    let md = informe::markdown(&acta, &verificada, &sello);
     match salida {
         Some(s) => {
             std::fs::write(&s, md)?;
@@ -383,7 +404,11 @@ fn orden_acta(ruta: PathBuf, salida: Option<PathBuf>) -> Result<()> {
         }
         None => print!("{md}"),
     }
-    Ok(())
+    // `tunjo acta` no puede ser MÁS PERMISIVO que `tunjo verificar` sobre el mismo
+    // archivo: quien entrega un acta forjada sugeriría el comando que sale con 0.
+    let bien = matches!(verificada, informe::ActaVerificada::Valida)
+        && !matches!(sello, informe::SelloVerificado::Invalido(_));
+    Ok(bien)
 }
 
 fn ahora_utc() -> String {
@@ -663,7 +688,7 @@ fn main() -> ExitCode {
         )
         .map(|_| true),
         Orden::Verificar { acta, origen, tsa_ca } => orden_verificar(acta, origen, tsa_ca),
-        Orden::Acta { acta, salida } => orden_acta(acta, salida).map(|_| true),
+        Orden::Acta { acta, salida, tsa_ca } => orden_acta(acta, salida, tsa_ca),
         Orden::Custodia { accion } => orden_custodia(accion),
     };
 

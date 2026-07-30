@@ -70,6 +70,10 @@ const OID_ATTR_MESSAGE_DIGEST: ObjectIdentifier =
     ObjectIdentifier::new_unwrap("1.2.840.113549.1.9.4");
 /// Extensión `extKeyUsage`.
 const OID_EXT_EKU: ObjectIdentifier = ObjectIdentifier::new_unwrap("2.5.29.37");
+/// Extensión `basicConstraints`: dice si un certificado puede EMITIR otros.
+const OID_EXT_BASIC_CONSTRAINTS: ObjectIdentifier = ObjectIdentifier::new_unwrap("2.5.29.19");
+/// Extensión `keyUsage`.
+const OID_EXT_KEY_USAGE: ObjectIdentifier = ObjectIdentifier::new_unwrap("2.5.29.15");
 /// `id-kp-timeStamping` — RFC 3161 §2.3 lo exige en el certificado de la TSA.
 const OID_KP_TIMESTAMPING: ObjectIdentifier = ObjectIdentifier::new_unwrap("1.3.6.1.5.5.7.3.8");
 
@@ -553,18 +557,25 @@ fn anclar(
     let mut actual = firmante.clone();
     // Tres saltos cubre cualquier jerarquía de TSA real (hoja → intermedia →
     // raíz); el tope existe para que un lote de certificados con un ciclo no
-    // convierta esto en un bucle.
-    for _ in 0..3 {
-        // ¿Alguna ancla firmó el certificado actual?
+    // convierta esto en un bucle. `recorridos` es el índice porque cada vuelta
+    // sube exactamente un peldaño: es lo que limita `pathLenConstraint`.
+    for recorridos in 0..3usize {
+        // ¿Alguna ancla EMITIÓ el certificado actual? Para emitir hay que poder
+        // emitir: el nombre y la firma no bastan (ver `exigir_puede_emitir`).
         for ancla in anclas {
             if ancla.tbs_certificate.subject == actual.tbs_certificate.issuer
+                && exigir_puede_emitir(ancla, recorridos).is_ok()
                 && firma_de_certificado_valida(&actual, ancla).is_ok()
             {
                 exigir_vigencia(ancla, instante_utc)?;
                 return Ok(Some(ancla.tbs_certificate.subject.to_string()));
             }
         }
-        // ¿El ancla ES el certificado actual? (raíz aportada directamente)
+        // ¿El ancla ES el certificado actual? Aquí NO se exige poder emitir: el
+        // verificador está confiando en ESE certificado concreto, no usándolo
+        // para avalar a otro. Confiar en la hoja de una TSA que conoces es un
+        // anclaje legítimo, y exigirle `cA` la rechazaría por no ser lo que no
+        // pretende ser.
         if let Some(ancla) = anclas.iter().find(|a| {
             a.tbs_certificate.subject == actual.tbs_certificate.subject
                 && a.tbs_certificate.subject_public_key_info
@@ -572,10 +583,12 @@ fn anclar(
         }) {
             return Ok(Some(ancla.tbs_certificate.subject.to_string()));
         }
-        // Si no, se sube un peldaño con lo que venga en el token.
+        // Si no, se sube un peldaño con lo que venga en el token — y solo con un
+        // certificado que de verdad sea autoridad certificadora.
         let Some(padre) = del_token.iter().find(|c| {
             c.tbs_certificate.subject == actual.tbs_certificate.issuer
                 && c.tbs_certificate.subject != actual.tbs_certificate.subject
+                && exigir_puede_emitir(c, recorridos).is_ok()
                 && firma_de_certificado_valida(&actual, c).is_ok()
         }) else {
             break;
@@ -588,6 +601,62 @@ fn anclar(
         "el certificado del sello no encadena con ninguna de las anclas aportadas: \
          la fecha no viene de una autoridad en la que hayas dicho confiar"
     )
+}
+
+/// ¿Este certificado está autorizado a EMITIR otros?
+///
+/// Sin esta comprobación, el anclaje se conformaba con que el nombre del emisor
+/// cuadrara y la firma verificara — y eso convierte en autoridad certificadora a
+/// cualquier certificado de entidad final. Quien tuviera un certificado TLS
+/// cualquiera emitido bajo la misma raíz que el verificador aporta en `--tsa-ca`
+/// podía firmar con él una hoja falsa con el uso de sellado y obtener un anclaje
+/// válido: fecha inventada, atribuida a una autoridad real. Es el fallo clásico de
+/// validación de rutas, y lo tenía esta función hasta que la revisión lo cazó.
+///
+/// Se exige, sobre `basicConstraints` (RFC 5280 §4.2.1.9):
+///   - que la extensión ESTÉ y diga `cA = TRUE`. Ausente es rechazo, nunca un
+///     permiso por defecto.
+///   - `pathLenConstraint`, si viene, contra los certificados ya recorridos.
+///
+/// Y sobre `keyUsage` (§4.2.1.3): si está presente, que afirme `keyCertSign`. Si
+/// no está, no se inventa: la norma la hace obligatoria para una CA, pero su
+/// ausencia ya la cubre el rechazo por `basicConstraints`.
+fn exigir_puede_emitir(cert: &Certificate, recorridos: usize) -> Result<()> {
+    let Some(bytes) = extension(cert, &OID_EXT_BASIC_CONSTRAINTS) else {
+        bail!(
+            "«{}» no declara basicConstraints, así que no es una autoridad \
+             certificadora y no puede avalar a nadie",
+            cert.tbs_certificate.subject
+        );
+    };
+    let bc = x509_cert::ext::pkix::BasicConstraints::from_der(bytes)
+        .context("el basicConstraints del certificado no se pudo leer")?;
+    if !bc.ca {
+        bail!(
+            "«{}» tiene basicConstraints con cA = FALSE: es un certificado de \
+             entidad final y no puede emitir otros",
+            cert.tbs_certificate.subject
+        );
+    }
+    if bc.path_len_constraint.is_some_and(|m| recorridos > m as usize) {
+        bail!(
+            "«{}» limita la ruta a {} y ya se han recorrido {recorridos} certificados",
+            cert.tbs_certificate.subject,
+            bc.path_len_constraint.unwrap_or(0)
+        );
+    }
+    if let Some(ku) = extension(cert, &OID_EXT_KEY_USAGE) {
+        let usos = x509_cert::ext::pkix::KeyUsage::from_der(ku)
+            .context("el keyUsage del certificado no se pudo leer")?;
+        if !usos.key_cert_sign() {
+            bail!(
+                "«{}» tiene keyUsage sin keyCertSign: su clave no está autorizada a \
+                 firmar certificados",
+                cert.tbs_certificate.subject
+            );
+        }
+    }
+    Ok(())
 }
 
 /// Verifica la firma de un certificado con la clave pública de su emisor.
@@ -627,4 +696,78 @@ pub fn anclas_desde_pem(pem: &str) -> Result<Vec<Certificate>> {
         bail!("el archivo de anclas no contiene ningún certificado PEM");
     }
     Ok(salida)
+}
+
+#[cfg(test)]
+mod pruebas {
+    use super::*;
+
+    /// Los tres certificados del token real: hoja, intermedia y raíz de DigiCert.
+    /// Se usan porque son datos de verdad — la hoja es `CA:FALSE` con `keyUsage`
+    /// solo de firma digital, la intermedia `CA:TRUE, pathlen:0`, la raíz
+    /// `CA:TRUE` — y una regla de rutas hay que probarla contra jerarquías reales.
+    fn certificados() -> Vec<Certificate> {
+        use cms::cert::CertificateChoices;
+        const TOKEN: &[u8] =
+            include_bytes!(concat!(env!("CARGO_MANIFEST_DIR"), "/tests/fijos/sello_digicert.tsr"));
+        let ci = ContentInfo::from_der(TOKEN).unwrap();
+        let sd: SignedData = ci.content.decode_as().unwrap();
+        sd.certificates
+            .unwrap()
+            .0
+            .iter()
+            .filter_map(|c| match c {
+                CertificateChoices::Certificate(c) => Some(c.clone()),
+                _ => None,
+            })
+            .collect()
+    }
+
+    fn por_nombre(trozo: &str) -> Certificate {
+        certificados()
+            .into_iter()
+            .find(|c| c.tbs_certificate.subject.to_string().contains(trozo))
+            .unwrap_or_else(|| panic!("el token debe traer «{trozo}»"))
+    }
+
+    #[test]
+    fn una_hoja_no_puede_emitir_certificados() {
+        // ESTE es el agujero que la revisión encontró: sin esta comprobación,
+        // cualquiera con un certificado de entidad final bajo la misma raíz que el
+        // verificador aporta podía firmar con él una hoja falsa de sellado y
+        // obtener un anclaje válido. Fecha inventada, atribuida a DigiCert.
+        let hoja = por_nombre("Timestamp Responder");
+        let e = exigir_puede_emitir(&hoja, 0).unwrap_err();
+        assert!(
+            e.to_string().contains("cA = FALSE"),
+            "debe rechazarse por basicConstraints: {e}"
+        );
+    }
+
+    #[test]
+    fn una_intermedia_y_una_raiz_si_pueden() {
+        // El control de la prueba anterior: si rechazara también a estas, no
+        // estaría discriminando, estaría rompiendo el anclaje legítimo.
+        exigir_puede_emitir(&por_nombre("TimeStamping RSA4096"), 0).unwrap();
+        exigir_puede_emitir(&por_nombre("Trusted Root G4"), 1).unwrap();
+    }
+
+    #[test]
+    fn pathlen_cero_no_admite_una_ca_por_debajo() {
+        // La intermedia de DigiCert lleva `pathlen:0`: puede emitir hojas, no
+        // otras autoridades. Con un certificado ya recorrido, deja de valer.
+        let intermedia = por_nombre("TimeStamping RSA4096");
+        let e = exigir_puede_emitir(&intermedia, 1).unwrap_err();
+        assert!(e.to_string().contains("limita la ruta"), "{e}");
+    }
+
+    #[test]
+    fn sin_basic_constraints_se_rechaza_en_vez_de_suponer() {
+        // Un certificado sin la extensión no es «probablemente una CA»: no lo es.
+        // Se construye quitándole las extensiones a la raíz, que sí las tiene.
+        let mut raiz = por_nombre("Trusted Root G4");
+        raiz.tbs_certificate.extensions = None;
+        let e = exigir_puede_emitir(&raiz, 0).unwrap_err();
+        assert!(e.to_string().contains("no declara basicConstraints"), "{e}");
+    }
 }
