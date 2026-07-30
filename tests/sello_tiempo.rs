@@ -89,34 +89,39 @@ fn alterar_la_huella_dentro_del_token_se_detecta() {
 }
 
 #[test]
-fn el_limite_declarado_de_esta_herramienta_esta_medido() {
-    // Esta prueba fija un LÍMITE, no una virtud, y por eso está escrita al
-    // revés que las demás.
+fn alterar_la_firma_del_token_ahora_si_se_detecta() {
+    // Esta prueba era una TRAMPA que no saltó, y merece quedar contada.
     //
-    // Tunjo verifica que el token encapsule un TSTInfo y que su huella sea la
-    // de nuestra firma. NO valida la firma CMS del token contra la cadena de
-    // certificados de la autoridad: eso exige un almacén de confianza y un
-    // validador de PKI, y hacerlo a medias sería dar por verificado lo que no
-    // se verificó.
+    // Estaba escrita al revés —afirmaba `is_ok()` sobre un token con la firma
+    // alterada— para fijar un límite declarado: «tunjo NO valida la firma CMS».
+    // Su mensaje decía: «si esto ya falla, la validación CMS existe: actualiza el
+    // límite declarado en el acta, en el README y en MARCO_JURIDICO §5». La idea
+    // era buena: un guardián que obliga a corregir la documentación el día que la
+    // realidad cambie.
     //
-    // Consecuencia medible: alterar un byte de la firma CMS —al final del
-    // token— NO lo detecta esta herramienta. Sí lo detecta `openssl ts -verify`,
-    // comprobado: devuelve «Verification: FAILED». Por eso el acta guarda el
-    // token íntegro y remite a esa comprobación en vez de insinuar que aquí
-    // queda todo validado.
+    // El 2026-07-30 la validación CMS llegó (`firma_cms`) y la trampa **siguió
+    // verde**, porque apuntaba a `sello_tiempo::verificar`, que por diseño no
+    // comprueba la firma. El guardián estaba mirando la puerta equivocada, y
+    // durante horas siguió diciéndole al lector que el límite estaba vigente. Lo
+    // cazó la cuarta revisión de seguridad, no la prueba.
     //
-    // Si algún día se implementa la validación CMS, esta prueba fallará. Es lo
-    // que se busca: obligará a actualizar el acta y el README, que hoy declaran
-    // el límite.
+    // Ahora apunta a donde vive la comprobación, y afirma lo contrario.
     let mut roto = token();
     let n = roto.len();
     roto[n - 40] ^= 0xFF;
 
+    // La fecha no importa aquí: se rechaza antes de mirarla.
+    let e = tunjo::firma_cms::verificar_firma(&roto, "2026-07-26T16:04:52Z", &[])
+        .expect_err("un token con la firma alterada NO puede verificar");
+    let m = e.to_string();
     assert!(
-        sello_tiempo::verificar(&roto, &HASH_SELLADO).is_ok(),
-        "si esto ya falla, la validación CMS existe: actualiza el límite \
-         declarado en el acta (informe.rs), en el README y en MARCO_JURIDICO §5"
+        m.contains("NO es válida") || m.contains("no se pudo leer") || m.contains("no es un"),
+        "debe rechazarse por la firma o por el DER que rompió, no por otra cosa: {m}"
     );
+
+    // Y el token intacto sí pasa: si las dos fallaran, esto no probaría nada.
+    tunjo::firma_cms::verificar_firma(&token(), "2026-07-26T16:04:52Z", &[])
+        .expect("el token auténtico debe verificar");
 }
 
 /// Contra una autoridad viva. Opt-in:

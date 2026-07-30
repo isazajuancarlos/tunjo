@@ -162,6 +162,19 @@ pub enum ErrorActa {
     FirmaInvalida,
     SelloMalFormado,
     SelloNoCorresponde(String),
+    /// Un elemento se declara «leido» y no trae huella. No está atado a nada, y sin
+    /// esto el documento lo contaba como «con contenido verificable» y el numeral 1
+    /// de «Alcance y límites» acreditaba su contenido. La recolección NUNCA emite
+    /// ese estado —un archivo leído siempre lleva su SHA-256, incluso vacío—, así
+    /// que existe solo en un acta fabricada. Lo cazó la sexta revisión.
+    ElementoSinHuella {
+        ruta: String,
+    },
+    /// El token sella lo que dice sellar, pero su firma CMS no se sostiene: sin
+    /// firmante, con el certificado equivocado, o firmado por una clave que no es
+    /// la del certificado que trae. Es distinto de `SelloNoCorresponde` —ahí el
+    /// sello es de otra cosa— y por eso tiene su propio caso.
+    SelloSinFirmaValida(String),
 }
 
 impl std::fmt::Display for ErrorActa {
@@ -179,6 +192,17 @@ impl std::fmt::Display for ErrorActa {
             Self::FirmaInvalida => write!(f, "la firma NO verifica contra la clave pública del acta"),
             Self::SelloMalFormado => write!(f, "el sello de tiempo no es base64 válido"),
             Self::SelloNoCorresponde(m) => write!(f, "{m}"),
+            Self::ElementoSinHuella { ruta } => write!(
+                f,
+                "el elemento «{}» se declara leído pero no trae huella: no está \
+                 cubierto por nada y el acta no puede acreditar su contenido",
+                ruta.chars().map(|c| if c.is_control() { ' ' } else { c }).collect::<String>()
+            ),
+            Self::SelloSinFirmaValida(m) => write!(
+                f,
+                "el sello de tiempo no está correctamente firmado, así que no acredita \
+                 ninguna fecha: {m}"
+            ),
         }
     }
 }
@@ -213,7 +237,19 @@ impl Acta {
     /// declarado, no un error. `Err` significa que lleva uno que no cuadra, y
     /// eso sí es grave: un sello que no corresponde a esta firma no acredita
     /// nada sobre esta acta.
-    pub fn verificar_sello_tiempo(&self) -> Result<Option<crate::sello_tiempo::DatosSello>, ErrorActa> {
+    /// Verifica el sello de tiempo del acta: QUÉ sella y QUIÉN lo firmó.
+    ///
+    /// `anclas` son los certificados en los que el verificador ha decidido
+    /// confiar. La firma CMS se comprueba SIEMPRE —un token sin firmante, o cuya
+    /// firma no case con el certificado que trae, es un error, no una
+    /// advertencia—; las anclas deciden si además se puede afirmar QUIÉN fechó.
+    /// Con la lista vacía se devuelve [`Confianza::SinAnclar`] y quien lo reporte
+    /// no puede llamar «fecha cierta» a esa fecha: un autofirmado llega hasta ahí.
+    pub fn verificar_sello_tiempo(
+        &self,
+        anclas: &[x509_cert::Certificate],
+    ) -> Result<Option<(crate::sello_tiempo::DatosSello, crate::firma_cms::Confianza)>, ErrorActa>
+    {
         use base64::{Engine, engine::general_purpose::STANDARD};
 
         let Some(sello) = &self.sello_tiempo else {
@@ -224,9 +260,11 @@ impl Acta {
         let token = STANDARD.decode(&sello.token).map_err(|_| ErrorActa::SelloMalFormado)?;
 
         let hash = crate::sello_tiempo::hash_de(&firma_bytes);
-        crate::sello_tiempo::verificar(&token, &hash)
-            .map(Some)
-            .map_err(|e| ErrorActa::SelloNoCorresponde(e.to_string()))
+        let datos = crate::sello_tiempo::verificar(&token, &hash)
+            .map_err(|e| ErrorActa::SelloNoCorresponde(e.to_string()))?;
+        let confianza = crate::firma_cms::verificar_firma(&token, &datos.fecha_utc, anclas)
+            .map_err(|e| ErrorActa::SelloSinFirmaValida(e.to_string()))?;
+        Ok(Some((datos, confianza)))
     }
 
     /// Raíz de Merkle calculada a partir de los elementos presentes.
@@ -257,6 +295,17 @@ impl Acta {
 
         if self.formato != FORMATO {
             return Err(ErrorActa::FormatoDesconocido(self.formato.clone()));
+        }
+        // Antes que la raíz y que la firma: un acta que declara contenido sin
+        // huella no acredita nada, y da igual que su firma cuadre. Fallar aquí es
+        // lo que impide que el documento afirme sobre ella (directiva de fallar en
+        // vez de suponer).
+        if let Some(e) = self
+            .elementos
+            .iter()
+            .find(|e| e.estado == "leido" && e.sha256.is_empty())
+        {
+            return Err(ErrorActa::ElementoSinHuella { ruta: e.ruta.clone() });
         }
         let calculada = self.raiz_calculada().ok_or(ErrorActa::SinElementos)?;
         if calculada != self.raiz_merkle {

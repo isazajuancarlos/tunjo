@@ -50,6 +50,20 @@ rpassword = "7"
 cms = "0.2"
 der = { version = "0.7", features = ["oid", "std"] }
 const-oid = "0.9"
+# Verificación de la firma CMS del token (#196). `x509-cert` y `spki` ya venían
+# por `cms`; se declaran explícitos porque ahora los usa código nuestro, y una
+# dependencia que se usa a la cara no se hereda en silencio.
+x509-cert = "0.2"
+spki = "0.7"
+rsa = "0.9"
+p256 = { version = "0.13", features = ["ecdsa"] }
+p384 = { version = "0.13", features = ["ecdsa"] }
+# `rsa` y `p256` hablan `digest` 0.10, no el `sha2` 0.11 del resto de tunjo. Las
+# dos versiones ya estaban en el árbol; se declara la 0.10 con nombre propio para
+# que su uso sea una decisión visible y no una coincidencia de resolución.
+# La feature `oid` es obligatoria, no cosmética: `rsa` construye la clave de
+# verificación PKCS#1 v1.5 a partir del OID asociado a la huella.
+sha2_010 = { package = "sha2", version = "0.10", features = ["oid"] }
 ureq = "3"
 # El nonce del sello viene del RNG del sistema: es lo que impide que una
 # autoridad reutilice un token viejo como si fuera nuevo.

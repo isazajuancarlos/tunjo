@@ -79,6 +79,12 @@ enum Orden {
         /// Contrasta además contra el contenido actual de esta ruta.
         #[arg(long)]
         origen: Option<PathBuf>,
+        /// PEM con el certificado de la autoridad de sellado en el que decides
+        /// confiar. Sin esto la firma del sello se comprueba igual, pero la
+        /// IDENTIDAD de la autoridad no queda acreditada y no se llama «fecha
+        /// cierta» a la fecha. No hay lista por defecto a propósito.
+        #[arg(long = "tsa-ca")]
+        tsa_ca: Option<PathBuf>,
     },
     /// Genera el acta legible (Markdown) a partir del JSON firmado.
     Acta {
@@ -86,6 +92,10 @@ enum Orden {
         /// Dónde escribirla. Si se omite, sale por pantalla.
         #[arg(long)]
         salida: Option<PathBuf>,
+        /// PEM de la autoridad de sellado en la que confías. Sin esto el documento
+        /// NO afirmará fecha cierta, aunque el sello lleve firma válida.
+        #[arg(long = "tsa-ca")]
+        tsa_ca: Option<PathBuf>,
     },
     /// Cadena de custodia: la secuencia de eventos sobre una evidencia sellada.
     Custodia {
@@ -140,6 +150,15 @@ enum Custodia {
         #[arg(long)]
         descripcion: String,
     },
+    /// Sella el último eslabón contra una autoridad de tiempo RFC 3161, para que
+    /// truncar la cadena por el final sea detectable y toda ella tenga fecha cierta.
+    Sello {
+        #[arg(long, default_value = "cadena.json")]
+        cadena: PathBuf,
+        /// URL de la autoridad de sellado (RFC 3161), p. ej. http://timestamp.digicert.com
+        #[arg(long)]
+        sello: String,
+    },
     /// Verifica la cadena (eslabones, firmas triple, secuencia) y, con --acta, el ancla.
     Verificar {
         #[arg(long, default_value = "cadena.json")]
@@ -147,6 +166,14 @@ enum Custodia {
         /// Comprueba además que la cadena corresponde a esta acta.
         #[arg(long)]
         acta: Option<PathBuf>,
+        /// PEM con el certificado —o los certificados— de la autoridad de sellado
+        /// en los que decides confiar, normalmente su raíz. Sin esto la firma del
+        /// sello se comprueba igual, pero su IDENTIDAD no queda acreditada: un
+        /// autofirmado con el uso de sellado pasa la comprobación criptográfica.
+        /// No hay lista por defecto a propósito: en quién confías no lo decide
+        /// esta herramienta.
+        #[arg(long = "tsa-ca")]
+        tsa_ca: Option<PathBuf>,
     },
 }
 
@@ -154,6 +181,21 @@ fn leer_acta(ruta: &Path) -> Result<Acta> {
     let texto = std::fs::read_to_string(ruta)
         .with_context(|| format!("leyendo el acta {}", ruta.display()))?;
     serde_json::from_str(&texto).with_context(|| format!("el acta {} no es válida", ruta.display()))
+}
+
+/// Lee las anclas de confianza de `--tsa-ca`, o ninguna si no se pidieron.
+///
+/// Si se pidió y el archivo no sirve, se FALLA: quien pasa `--tsa-ca` está
+/// exigiendo ese control, y seguir sin él en silencio daría por acreditado lo que
+/// no lo está (directiva de fallar en vez de suponer).
+fn leer_anclas(ruta: Option<&Path>) -> Result<Vec<x509_cert::Certificate>> {
+    let Some(p) = ruta else {
+        return Ok(Vec::new());
+    };
+    let pem = std::fs::read_to_string(p)
+        .with_context(|| format!("leyendo las anclas {}", p.display()))?;
+    tunjo::firma_cms::anclas_desde_pem(&pem)
+        .with_context(|| format!("las anclas de {}", p.display()))
 }
 
 /// Variable con la que se automatiza el sellado por lotes.
@@ -252,24 +294,46 @@ fn orden_sellar(
 }
 
 fn resumen_elementos(elementos: &[Elemento]) -> String {
-    let leidos = elementos.iter().filter(|e| e.estado == "leido").count();
-    format!("{} elementos, {leidos} con contenido verificable", elementos.len())
+    // La regla de qué es «verificable» —por la EVIDENCIA y no por el estado
+    // declarado— vive en UN sitio, `informe::verificables`. Estuvo copiada aquí y
+    // en el generador del documento, y esa es la forma en que dos conteos que
+    // deberían decir lo mismo se separan sin que nadie lo note.
+    format!(
+        "{} elementos, {} con contenido verificable",
+        elementos.len(),
+        informe::verificables(elementos)
+    )
 }
 
-fn orden_verificar(ruta: PathBuf, origen: Option<PathBuf>) -> Result<bool> {
+fn orden_verificar(
+    ruta: PathBuf,
+    origen: Option<PathBuf>,
+    tsa_ca: Option<PathBuf>,
+) -> Result<bool> {
+    let anclas = leer_anclas(tsa_ca.as_deref())?;
     let acta = leer_acta(&ruta)?;
 
     match acta.verificar_sello() {
         Ok(()) => {
             println!("SELLO VÁLIDO");
-            println!("  referencia: {}", acta.caso.referencia);
-            println!("  perito:     {} ({})", acta.perito.nombre, acta.perito.identificacion);
-            println!("  adquirido:  {}", acta.adquisicion.reloj.inicio_utc);
+            // Todo campo del JSON pasa por `plano`. La firma que acaba de verificar
+            // es la del PROPIO autor del acta, no la de nadie de confianza: estos
+            // cuatro textos los elige quien la entrega, y un salto de línea con un
+            // «oculta lo siguiente» replicaba un veredicto anclado completo y
+            // escondía las líneas reales. Quinta revisión — el mismo hallazgo de la
+            // cuarta, una rama más allá.
+            println!("  referencia: {}", informe::plano(&acta.caso.referencia));
+            println!(
+                "  perito:     {} ({})",
+                informe::plano(&acta.perito.nombre),
+                informe::plano(&acta.perito.identificacion)
+            );
+            println!("  adquirido:  {}", informe::plano(&acta.adquisicion.reloj.inicio_utc));
             println!("  contenido:  {}", resumen_elementos(&acta.elementos));
             println!("  raíz:       {}", acta.raiz_merkle);
         }
         Err(e) => {
-            println!("SELLO INVÁLIDO: {e}");
+            println!("SELLO INVÁLIDO: {}", informe::plano(&e.to_string()));
             return Ok(false);
         }
     }
@@ -277,9 +341,24 @@ fn orden_verificar(ruta: PathBuf, origen: Option<PathBuf>) -> Result<bool> {
     // El sello de tiempo se verifica aparte y su ausencia NO invalida el acta:
     // es un límite declarado, no un defecto. Lo que sí invalida es llevar uno
     // que sella otra cosa.
-    match acta.verificar_sello_tiempo() {
-        Ok(Some(t)) => {
-            println!("  fecha cierta: {} (autoridad RFC 3161)", t.fecha_utc);
+    match acta.verificar_sello_tiempo(&anclas) {
+        Ok(Some((t, confianza))) => {
+            if confianza.acredita_autoridad() {
+                println!("  fecha cierta: {} (RFC 3161)", t.fecha_utc);
+                println!("  autoridad:    {} — anclada", confianza.autoridad());
+            } else {
+                // Firma válida pero anónima: no se llama «fecha cierta» a algo que
+                // un autofirmado produce igual.
+                println!(
+                    "  fecha:        {} — firma válida, pero SIN ANCLAR",
+                    t.fecha_utc
+                );
+                println!(
+                    "  autoridad:    «{}», identidad NO acreditada.\n\
+                     \x20               Exígela con `--tsa-ca <raíz.pem>`.",
+                    confianza.autoridad()
+                );
+            }
             println!("  política:     {}", t.politica);
         }
         Ok(None) => println!(
@@ -287,7 +366,7 @@ fn orden_verificar(ruta: PathBuf, origen: Option<PathBuf>) -> Result<bool> {
              \x20               así que prueba orden relativo, no fecha oponible"
         ),
         Err(e) => {
-            println!("SELLO DE TIEMPO INVÁLIDO: {e}");
+            println!("SELLO DE TIEMPO INVÁLIDO: {}", informe::plano(&e.to_string()));
             return Ok(false);
         }
     }
@@ -309,15 +388,32 @@ fn orden_verificar(ruta: PathBuf, origen: Option<PathBuf>) -> Result<bool> {
     Ok(false)
 }
 
-fn orden_acta(ruta: PathBuf, salida: Option<PathBuf>) -> Result<()> {
+fn orden_acta(ruta: PathBuf, salida: Option<PathBuf>, tsa_ca: Option<PathBuf>) -> Result<bool> {
     let acta = leer_acta(&ruta)?;
-    // Se avisa, pero se genera igual: un acta sin firmar también hay que poder
-    // leerla para revisarla antes de sellar.
-    if let Err(e) = acta.verificar_sello() {
-        eprintln!("AVISO: el sello de esta acta no es válido ({e}).");
-        eprintln!("El documento se genera igualmente, pero NO acredita integridad.");
-    }
-    let md = informe::markdown(&acta);
+    // El documento se genera igual —hay que poder leer un acta para revisarla—,
+    // pero el veredicto viaja DENTRO de él y además decide el código de salida.
+    // Antes eran dos líneas en stderr: no llegan al juzgado, y cualquier
+    // redirección o `--salida` las perdía mientras el documento seguía afirmando
+    // integridad. Lo cazó la tercera revisión de seguridad.
+    let verificada = match acta.verificar_sello() {
+        Ok(()) => informe::ActaVerificada::Valida,
+        Err(e) => {
+            eprintln!("AVISO: la firma de esta acta NO verifica ({}).", informe::plano(&e.to_string()));
+            informe::ActaVerificada::Invalida(e.to_string())
+        }
+    };
+    // El documento legible NO puede afirmar la fecha leyéndola del JSON: eso es un
+    // dato de quien entrega el acta. Se verifica aquí y se le pasa el VEREDICTO.
+    let anclas = leer_anclas(tsa_ca.as_deref())?;
+    let sello = match acta.verificar_sello_tiempo(&anclas) {
+        Ok(Some((datos, confianza))) => informe::SelloVerificado::Valido(datos, confianza),
+        Ok(None) => informe::SelloVerificado::Ausente,
+        Err(e) => {
+            eprintln!("AVISO: el sello de tiempo de esta acta NO es válido ({}).", informe::plano(&e.to_string()));
+            informe::SelloVerificado::Invalido(e.to_string())
+        }
+    };
+    let md = informe::markdown(&acta, &verificada, &sello);
     match salida {
         Some(s) => {
             std::fs::write(&s, md)?;
@@ -325,7 +421,11 @@ fn orden_acta(ruta: PathBuf, salida: Option<PathBuf>) -> Result<()> {
         }
         None => print!("{md}"),
     }
-    Ok(())
+    // `tunjo acta` no puede ser MÁS PERMISIVO que `tunjo verificar` sobre el mismo
+    // archivo: quien entrega un acta forjada sugeriría el comando que sale con 0.
+    let bien = matches!(verificada, informe::ActaVerificada::Valida)
+        && !matches!(sello, informe::SelloVerificado::Invalido(_));
+    Ok(bien)
 }
 
 fn ahora_utc() -> String {
@@ -415,10 +515,39 @@ fn orden_custodia(accion: Custodia) -> Result<bool> {
             );
             Ok(true)
         }
-        Custodia::Verificar { cadena: ruta, acta } => {
+        Custodia::Sello { cadena: ruta, sello } => {
+            let texto = std::fs::read_to_string(&ruta)
+                .with_context(|| format!("leyendo la cadena {}", ruta.display()))?;
+            let mut cadena = custodia::desde_json(&texto)?;
+            let datos = custodia::sellar_final(&mut cadena, &sello)?;
+            std::fs::write(&ruta, serde_json::to_vec_pretty(&cadena)?)?;
+            let n = cadena.eslabones.len();
+            println!(
+                // Decía «desde ahora, entregar la cadena recortada por el final se
+                // detecta al verificar», y prometía más que el README y más que el
+                // propio verificador: quien recorta la cadena puede quitar también
+                // el sello, y entonces se ve «sin sello», no «truncada». El sello
+                // tiene que VIAJAR con la cadena o estar publicado. La séptima
+                // revisión lo dejó como residual informativo; se cierra aquí porque
+                // una herramienta que acredita no puede decir de más en su propia
+                // salida. Es la misma regla que el documento: nada que no se pueda
+                // sostener.
+                "Sello de tiempo puesto sobre el eslabón {} (el último de {n}).\n  \
+                 fecha cierta: {} — {}\n  \
+                 Una cadena recortada por el final se detecta al verificar MIENTRAS el\n  \
+                 sello llegue con ella: quien la recorta puede quitarlo también, y\n  \
+                 entonces se verá «sin sello». Entrégalo junto a la cadena o publícalo.",
+                n - 1,
+                datos.fecha_utc,
+                sello
+            );
+            Ok(true)
+        }
+        Custodia::Verificar { cadena: ruta, acta, tsa_ca } => {
             let texto = std::fs::read_to_string(&ruta)
                 .with_context(|| format!("leyendo la cadena {}", ruta.display()))?;
             let cadena = custodia::desde_json(&texto)?;
+            let anclas = leer_anclas(tsa_ca.as_deref())?;
             // El acta se ata por CONTENIDO (sus bytes canónicos) y por AUTOR (la
             // clave pública de su perito): las dos viven mientras dura el match.
             let acta_cargada = match &acta {
@@ -439,8 +568,48 @@ fn orden_custodia(accion: Custodia) -> Result<bool> {
                         "✔ Cadena de custodia ÍNTEGRA: {} eslabones, firmas triple válidas, sin saltos ni reordenamientos.",
                         cadena.eslabones.len()
                     );
-                    if acta.is_some() {
-                        println!("  Y corresponde al acta, firmada por su mismo perito.");
+                    // Se acumula y se decide AL FINAL. El retorno temprano que
+                    // puso la cuarta revisión se saltaba `estado_sello`, que es el
+                    // único sitio que detecta TRUNCADA — y para entonces ya se
+                    // había impreso «ÍNTEGRA». Quinta revisión.
+                    let mut bien = true;
+                    if let Some(a) = &acta_cargada {
+                        // `custodia::verificar` solo compara la clave como CADENA y
+                        // el hash canónico: no dice nada de si el acta está firmada
+                        // ni de si su sello vale. Se comprueban LAS DOS COSAS, o
+                        // este comando queda más permisivo que `tunjo verificar`
+                        // sobre el mismo archivo.
+                        match a.verificar_sello() {
+                            Ok(()) => println!(
+                                "  Y corresponde al acta, cuya firma SÍ verifica con la misma clave."
+                            ),
+                            Err(e) => {
+                                println!(
+                                    "  ✗ Corresponde a esa acta, pero LA FIRMA DEL ACTA NO VERIFICA: {}",
+                                    informe::plano(&e.to_string())
+                                );
+                                println!(
+                                    "    La cadena está íntegra sobre un acta que no acredita nada."
+                                );
+                                bien = false;
+                            }
+                        }
+                        match a.verificar_sello_tiempo(&anclas) {
+                            Ok(Some((_, c))) if c.acredita_autoridad() => {
+                                println!("  El sello de tiempo del ACTA es válido y está anclado.");
+                            }
+                            Ok(Some(_)) => println!(
+                                "  ⚠ El sello de tiempo del ACTA tiene firma válida pero SIN ANCLAR."
+                            ),
+                            Ok(None) => println!("  (El acta no lleva sello de tiempo propio.)"),
+                            Err(e) => {
+                                println!(
+                                    "  ✗ EL SELLO DE TIEMPO DEL ACTA NO ES VÁLIDO: {}",
+                                    informe::plano(&e.to_string())
+                                );
+                                bien = false;
+                            }
+                        }
                     } else {
                         println!("  (Sin --acta no se comprobó a qué acta pertenece ni quién la firmó.)");
                     }
@@ -448,7 +617,78 @@ fn orden_custodia(accion: Custodia) -> Result<bool> {
                         "  Huella de la clave de la cadena (cotéjala con la del perito): {}",
                         huella_clave(&cadena.clave_publica)
                     );
-                    Ok(true)
+                    // La integridad prueba un PREFIJO; el sello de tiempo dice si
+                    // ese prefijo es TODO lo que hubo. Sin sello no se puede saber.
+                    // El resultado se COMBINA con lo que dijo el acta: ninguna
+                    // mitad puede tapar el fallo de la otra.
+                    let sello_ok = match custodia::estado_sello(&cadena, &anclas) {
+                        custodia::EstadoSello::Ausente => {
+                            println!(
+                                "  Sin sello de tiempo: prueba el orden relativo, no la fecha ni que\n  \
+                                 no falten eventos AL FINAL. Séllala con `tunjo custodia sello`."
+                            );
+                            true
+                        }
+                        custodia::EstadoSello::Vigente { fecha_utc, secuencia, confianza } => {
+                            if confianza.acredita_autoridad() {
+                                println!(
+                                    "  ✔ Sellada en el tiempo (RFC 3161) sobre el último eslabón ({secuencia}):\n  \
+                                     fecha cierta {fecha_utc}, acreditada por {}.\n  \
+                                     La cadena está completa hasta aquí.",
+                                    confianza.autoridad()
+                                );
+                            } else {
+                                // Sin ancla la firma es válida pero anónima, y NO se
+                                // afirma completitud: un autofirmado llega hasta aquí.
+                                println!(
+                                    "  ⚠ Sello sobre el último eslabón ({secuencia}) con firma válida de\n  \
+                                     «{}», fecha {fecha_utc} — pero SIN ANCLAR: no dijiste en qué\n  \
+                                     autoridad confías, así que esa identidad no está acreditada y de\n  \
+                                     esta cadena no se puede afirmar que esté completa.\n  \
+                                     Exígelo con `--tsa-ca <raíz.pem>`.",
+                                    confianza.autoridad()
+                                );
+                            }
+                            true
+                        }
+                        custodia::EstadoSello::CubrePrefijo { fecha_utc, sellado, ultimo, confianza } => {
+                            println!(
+                                "  {} Sellada en el tiempo (RFC 3161) hasta el eslabón {sellado} ({fecha_utc});\n  \
+                                 los eslabones {}..{ultimo} se añadieron después y aún no están sellados.{}",
+                                if confianza.acredita_autoridad() { "✔" } else { "⚠" },
+                                sellado + 1,
+                                if confianza.acredita_autoridad() {
+                                    String::new()
+                                } else {
+                                    format!(
+                                        "\n  El sello lo firma «{}» y NO está anclado: esa identidad no\n  \
+                                         está acreditada. Exígelo con `--tsa-ca <raíz.pem>`.",
+                                        confianza.autoridad()
+                                    )
+                                }
+                            );
+                            true
+                        }
+                        custodia::EstadoSello::Truncada { fecha_utc, sellado, ultimo, confianza } => {
+                            // Se delata igual con sello anclado o sin anclar: la cadena
+                            // se contradice a sí misma, y eso no depende de la confianza.
+                            println!(
+                                "  ✗ TRUNCADA: hay un sello de tiempo ({fecha_utc}) sobre el eslabón {sellado},\n  \
+                                 pero la cadena entregada llega solo al {ultimo}. Le quitaron eventos del final.\n  \
+                                 Sello firmado por «{}»{}.",
+                                confianza.autoridad(),
+                                if confianza.acredita_autoridad() { ", anclado" } else { ", SIN anclar" }
+                            );
+                            false
+                        }
+                        custodia::EstadoSello::Invalido { motivo } => {
+                            println!("  ✗ El sello de tiempo NO es válido: {motivo}.");
+                            false
+                        }
+                    };
+                    // `bien` viene del acta; `sello_ok`, de la cadena. Un fallo en
+                    // cualquiera de los dos es un fallo del comando.
+                    Ok(bien && sello_ok)
                 }
                 custodia::Veredicto::Rota { secuencia, motivo } => {
                     println!("✗ Cadena ROTA en el eslabón {secuencia}: {motivo}.");
@@ -457,7 +697,9 @@ fn orden_custodia(accion: Custodia) -> Result<bool> {
                 custodia::Veredicto::ActaNoCorresponde { esperado, encontrado } => {
                     println!(
                         "✗ La cadena es íntegra pero ancla OTRA acta.\n  \
-                         esperado (acta dada): {esperado}\n  ancla de la cadena:   {encontrado}"
+                         esperado (acta dada): {}\n  ancla de la cadena:   {}",
+                        informe::plano(&esperado),
+                        informe::plano(&encontrado)
                     );
                     Ok(false)
                 }
@@ -520,8 +762,8 @@ fn main() -> ExitCode {
             salida,
         )
         .map(|_| true),
-        Orden::Verificar { acta, origen } => orden_verificar(acta, origen),
-        Orden::Acta { acta, salida } => orden_acta(acta, salida).map(|_| true),
+        Orden::Verificar { acta, origen, tsa_ca } => orden_verificar(acta, origen, tsa_ca),
+        Orden::Acta { acta, salida, tsa_ca } => orden_acta(acta, salida, tsa_ca),
         Orden::Custodia { accion } => orden_custodia(accion),
     };
 

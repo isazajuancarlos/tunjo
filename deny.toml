@@ -5,6 +5,28 @@
 
 [advisories]
 version = 2
+# La ÚNICA excepción, y va con su prueba (directiva 6: si puede ser código, no va
+# en prosa). Ver `tests/cadena_suministro.rs::la_exencion_de_rsa_sigue_siendo_cierta`,
+# que se pone roja el día que deje de ser verdad lo que aquí se afirma.
+#
+# RUSTSEC-2023-0071 — «Marvin Attack» sobre el crate `rsa` 0.9.
+# Sin parche disponible: «No safe upgrade is available!».
+#
+# POR QUÉ NO NOS APLICA. La vulnerabilidad es una fuga por tiempo durante las
+# operaciones con la CLAVE PRIVADA (descifrado y firma), y lo que se recupera con
+# ella es esa clave privada. Tunjo no tiene ninguna clave privada RSA: usa `rsa`
+# en un solo sitio —`src/firma_cms.rs`— y solo para VERIFICAR la firma de un token
+# de sellado con la clave PÚBLICA de la autoridad, que es pública por definición.
+# No hay secreto que filtrar y no hay operación privada que cronometrar.
+#
+# Y las claves de tunjo no son RSA: el acta se firma en triple con
+# Ed25519 + ML-DSA-87 + SLH-DSA, que es otro camino entero.
+#
+# Esto es una SALVAGUARDA NUEVA —un atajo que evita una comprobación— así que se
+# le exige lo mismo que a cualquier otra: que discrimine. La exención es de UN
+# aviso concreto, no del crate ni de la categoría, y la prueba comprueba la
+# premisa en vez de confiar en que nadie la rompa.
+ignore = ["RUSTSEC-2023-0071"]
 
 [licenses]
 version = 2

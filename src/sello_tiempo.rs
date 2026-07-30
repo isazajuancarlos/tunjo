@@ -39,11 +39,17 @@
 //! sea exactamente el hash de la firma del acta, y se extraen la fecha, la
 //! política y el número de serie.
 //!
-//! **No se valida la firma CMS del token contra la cadena de certificados de la
-//! autoridad.** Eso exige un almacén de confianza y un validador de PKI, y
-//! hacerlo a medias sería peor que no hacerlo: daría por verificado lo que no se
-//! verificó. El token se guarda íntegro en el acta, de modo que cualquiera lo
-//! valide con la herramienta estándar:
+//! **Este módulo NO comprueba la firma CMS del token**: eso vive en
+//! [`crate::firma_cms`] desde el 2026-07-30, y sus llamadores lo invocan SIEMPRE
+//! junto con `verificar` (`custodia::estado_sello`, `Acta::verificar_sello_tiempo`,
+//! `custodia::sellar_final`, `sellado`). Hasta esa fecha esta cabecera decía que
+//! la firma no se validaba EN NINGÚN SITIO, y era cierto; dejarla así después
+//! habría sido igual de engañoso al revés, porque es la cabecera que alguien lee
+//! para saber qué garantiza la herramienta.
+//!
+//! Lo que sigue fuera de alcance en todo el programa: validación PKI completa
+//! —revocación (CRL/OCSP), restricciones de nombre, políticas de certificación—.
+//! Para eso, la herramienta estándar, con el token que el acta guarda íntegro:
 //!
 //! ```text
 //! openssl ts -verify -in sello.tsr -data firma.bin -CAfile cadena_tsa.pem
@@ -53,7 +59,7 @@
 
 use anyhow::{Context, Result, bail};
 use der::asn1::{GeneralizedTime, Int, ObjectIdentifier, OctetString};
-use der::{Decode, Encode, Reader, SliceReader, Tag};
+use der::{Decode, Encode, Reader, SliceReader, Tag, Tagged};
 use sha2::{Digest, Sha256};
 
 /// OID de SHA-256 (2.16.840.1.101.3.4.2.1).
@@ -114,8 +120,15 @@ fn peticion_der(hash: &[u8; 32], nonce: &[u8; 16]) -> Result<Vec<u8>> {
 
 /// Pide un sello a la autoridad y devuelve el token tal cual, en DER.
 ///
-/// El nonce lo elige quien llama y se comprueba en la respuesta: es lo que
-/// impide que una autoridad —o quien se interponga— reutilice un token viejo.
+/// El nonce lo elige quien llama y **se comprueba en la respuesta**: es lo que
+/// impide que la autoridad —o quien se interponga— entregue un token viejo como
+/// si fuera nuevo. RFC 3161 §2.4.2 obliga a devolverlo cuando la petición lo
+/// lleva, así que su ausencia también es un rechazo: no se puede comprobar un
+/// control y dar por bueno que no hacía falta.
+///
+/// Hasta el 2026-07-30 este párrafo decía que el nonce se comprobaba y no se
+/// comprobaba en ningún sitio — el parser saltaba la cola opcional del `TSTInfo`
+/// donde viaja. Lo cazó la primera revisión de seguridad.
 pub fn solicitar(hash_firma: &[u8; 32], url: &str, nonce: &[u8; 16]) -> Result<Vec<u8>> {
     let peticion = peticion_der(hash_firma, nonce)?;
 
@@ -129,7 +142,32 @@ pub fn solicitar(hash_firma: &[u8; 32], url: &str, nonce: &[u8; 16]) -> Result<V
         .read_to_vec()
         .context("no se pudo leer la respuesta de la autoridad de sellado")?;
 
-    extraer_token(&cuerpo)
+    let token = extraer_token(&cuerpo)?;
+    comprobar_nonce(&token, nonce)?;
+    Ok(token)
+}
+
+/// Comprueba que el token responde a ESTA petición y no a otra anterior.
+fn comprobar_nonce(token_der: &[u8], enviado: &[u8; 16]) -> Result<()> {
+    let info = extraer_tstinfo(token_der)?;
+    let Some(recibido) = info.nonce else {
+        bail!(
+            "la autoridad no devolvió el nonce que se le envió. RFC 3161 lo exige \
+             cuando la petición lo lleva, y sin él no se puede distinguir un sello \
+             nuevo de uno viejo reenviado"
+        );
+    };
+    // Se compara contra la forma DER canónica del entero, que es la que viajó en
+    // la petición: comparar los 16 bytes crudos fallaría cuando DER añade el 0x00
+    // que impide leer el valor como negativo.
+    let esperado = Int::new(enviado.as_slice())?;
+    if recibido != esperado.as_bytes() {
+        bail!(
+            "el nonce del sello no es el que se envió: la respuesta no corresponde a \
+             esta petición"
+        );
+    }
+    Ok(())
 }
 
 // -------------------------------------------------------------------- parsear
@@ -188,6 +226,9 @@ struct InfoSello {
     huella: HuellaMensaje,
     serie: Int,
     fecha: GeneralizedTime,
+    /// Nonce que la autoridad devuelve, si lo devuelve. RFC 3161 §2.4.2 lo hace
+    /// obligatorio en la respuesta cuando la petición lo llevaba.
+    nonce: Option<Vec<u8>>,
 }
 
 /// Decodifica un `TSTInfo` quedándose con los cinco primeros campos.
@@ -207,10 +248,19 @@ fn parsear_tstinfo(bytes: &[u8]) -> Result<InfoSello> {
             let huella: HuellaMensaje = r.decode()?;
             let serie: Int = r.decode()?;
             let fecha: GeneralizedTime = r.decode()?;
+            // La cola opcional va en este orden: accuracy (SEQUENCE), ordering
+            // (BOOLEAN), nonce (INTEGER), tsa ([0]), extensions ([1]). El primer
+            // INTEGER de la cola es, por tanto, el nonce — no hace falta modelar
+            // los demás para encontrarlo, y seguimos sin interpretar lo que no se
+            // usa.
+            let mut nonce = None;
             while !r.is_finished() {
-                let _: der::AnyRef = r.decode()?;
+                let elemento: der::AnyRef = r.decode()?;
+                if nonce.is_none() && elemento.tag() == Tag::Integer {
+                    nonce = Some(elemento.value().to_vec());
+                }
             }
-            Ok(InfoSello { politica, huella, serie, fecha })
+            Ok(InfoSello { politica, huella, serie, fecha, nonce })
         })
         .context("el TSTInfo del sello no se pudo leer")?;
     Ok(info)

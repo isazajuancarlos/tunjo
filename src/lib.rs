@@ -15,11 +15,13 @@
 pub mod acta;
 pub mod clave;
 pub mod custodia;
+pub mod firma_cms;
 pub mod informe;
 pub mod merkle;
 pub mod recoleccion;
 pub mod sellado;
 pub mod sello_tiempo;
+pub mod texto;
 
 pub const VERSION: &str = env!("CARGO_PKG_VERSION");
 

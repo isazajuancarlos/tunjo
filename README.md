@@ -44,10 +44,27 @@ penal—. Ver `MARCO_JURIDICO.md` §6.1.
   línea por línea, y con ella se cae el resto.
 - **No prueba el pasado.** Acredita desde el instante de la adquisición. Si el
   material ya venía alterado, el sello certifica fielmente material alterado.
-- **No valida la firma de la autoridad de sellado** contra su cadena de
-  certificados. Verifica que el sello corresponde a la firma del acta, guarda el
-  token íntegro, y remite a `openssl ts -verify` para lo demás. Está medido: hay
-  una prueba que fija ese límite y falla si algún día deja de ser cierto.
+- **No hace validación PKI completa** del certificado de la autoridad de sellado:
+  sin revocación (CRL/OCSP), sin restricciones de nombre, sin políticas. Para eso,
+  `openssl ts -verify`.
+
+  Lo que **sí** verifica desde el 2026-07-30: que el token lleve exactamente un
+  firmante, que su certificado viaje dentro y declare el uso `id-kp-timeStamping`,
+  que los atributos firmados aten la firma a ESE `TSTInfo`, que la **firma** sea
+  válida con esa clave, y que el certificado estuviera vigente en el instante que
+  sella. Y con `--tsa-ca <raíz.pem>`, que ese certificado **encadene** hasta una
+  autoridad en la que tú hayas dicho confiar.
+
+  **Sin `--tsa-ca` la identidad de la autoridad NO está acreditada** y la
+  herramienta lo dice en la salida: un certificado autofirmado con el uso de
+  sellado pasa toda la comprobación criptográfica. No hay lista de confianza por
+  defecto a propósito — en quién confías no lo decide esta herramienta.
+
+  Antes de esa fecha no se verificaba ninguna firma, y era un límite declarado y
+  honesto mientras el sello fuese informativo. Dejó de serlo cuando el sello pasó
+  a sostener un veredicto: un `SignedData` con la lista de firmantes vacía es DER
+  válido, así que cualquiera podía fabricar «fecha cierta» con un editor. Hay
+  pruebas que fijan cada uno de esos rechazos.
 - **No escribe nunca dentro del origen.** Solo lee.
 
 ## Uso
@@ -87,6 +104,16 @@ El acta legible lleva las **huellas** de la clave y de la firma, no sus valores
 completos: la firma triple ocupa 46 KB en base64 y nadie coteja eso en papel. La
 verificación se hace sobre el JSON; el Markdown es para leer.
 
+**Ninguna frase del documento afirma nada que no se haya comprobado.** No es una
+promesa de redacción cuidadosa: el generador está construido para que no se pueda
+escribir. Cada afirmación sobre el acta lleva en su *tipo* la comprobación que la
+sostiene, y va obligatoriamente acompañada de lo que se dice cuando esa
+comprobación falla —el silencio no es una opción, porque un acta que no verifica
+es precisamente la que alguien querría presentar como buena—. Y ningún texto del
+JSON llega al documento sin neutralizar, porque no hay forma de interpolarlo sin
+pasar por el escapado. Un acta cuya firma no verifica genera igual su documento,
+pero el documento dice, en cada numeral, que no acredita nada.
+
 ## Cadena de custodia: la secuencia, no solo el instante
 
 El acta prueba un **instante**: «esto existía en T0, con esta raíz Merkle,
@@ -124,11 +151,39 @@ custodia no puede ser el eslabón criptográficamente débil de la prueba.
 y el último eslabón presente. No puede probar que ese último eslabón sea el
 último que existió — quien tenga la clave puede quedarse con los primeros N
 eventos y entregar solo esos, y la cadena verifica ÍNTEGRA. Ninguna cadena de
-hashes puede cerrar ese hueco por sí sola, y `tunjo` todavía no sella la cadena
-como sella el acta: lo que lo cierra es **sacar el último hash del alcance de
-quien custodia** —dejarlo en el expediente, comunicarlo a la contraparte— en
-cada entrega. Que la cadena esté íntegra dice que no está *manipulada*, no que
-esté *completa*.
+hashes puede cerrar ese hueco por sí sola.
+
+Lo cierra un **sello de tiempo sobre el último eslabón**:
+
+```bash
+tunjo custodia sello --cadena cadena.json --sello http://timestamp.digicert.com
+```
+
+ancla el hash del último eslabón a una autoridad RFC 3161, y `custodia verificar`
+lo comprueba. Un sello sobre el eslabón 7 desmiente una cadena entregada con 5:
+la verificación reporta **TRUNCADA** y sale con error. Con más eventos añadidos
+tras el sello, informa hasta qué eslabón llega la fecha cierta (los posteriores
+quedan sin sellar hasta que se vuelva a sellar).
+
+El sello **debe viajar con la cadena o quedar publicado**: quien la recorta puede
+además quitar el sello, y entonces la verificación dirá «sin sello». Cierra el
+hueco frente a quien conserva el sello —el expediente, la contraparte—, no frente
+a quien nunca supo que existió; por eso se comunica o se archiva en cada entrega.
+Que la cadena esté íntegra dice que no está *manipulada*; el sello es lo que
+además dice que está *completa* y desde cuándo.
+
+**Y el sello hay que anclarlo, o no dice de quién viene la fecha:**
+
+```bash
+tunjo custodia verificar --cadena cadena.json --acta acta.json \
+  --tsa-ca raiz-de-la-tsa.pem
+```
+
+Sin `--tsa-ca` la firma del token se comprueba —un token forjado se rechaza— pero
+la identidad de la autoridad no queda acreditada, y la salida lo advierte en vez
+de afirmar completitud. Con la raíz aportada, el veredicto sí puede decir quién
+fechó. La truncación se delata en los dos casos: ahí la cadena se contradice a sí
+misma, y eso no depende de en quién se confíe.
 
 ## Fecha cierta: `--sello`
 
