@@ -37,6 +37,7 @@ use quipu::pqsign::{TripleSigningKey, generate_triple_keypair};
 use base64::{Engine, engine::general_purpose::STANDARD};
 use tunjo::acta::{Acta, Firma};
 use tunjo::informe::{self, ActaVerificada, SelloVerificado};
+use tunjo::custodia::{self, Evento};
 use tunjo::sellado::{self, Datos};
 
 // ------------------------------------------------------------------ andamiaje
@@ -90,15 +91,62 @@ fn refirmar(mut acta: Acta, sk: &TripleSigningKey) -> Acta {
     acta
 }
 
-/// Las cuatro combinaciones de veredicto que el documento tiene que distinguir.
+/// El token REAL de DigiCert que ya vive en `fijos/`, y lo que acredita.
+///
+/// Con él se construye un `SelloVerificado::Valido` de verdad, en sus dos grados de
+/// confianza. Hasta la sexta revisión `Valido` no aparecía en NINGUNA prueba
+/// —requiere un `DatosSello` y una `Confianza` que solo salen de un token real— y
+/// por eso unas setenta líneas de la sección 6 no las ejecutaba nada: los tres
+/// subcasos, la autoridad, la política, la serie, la huella del token y el bloque
+/// «Alcance de esta comprobación». Es la sección con el peor historial del archivo:
+/// ahí vivieron los defectos de las rondas primera, segunda y cuarta.
+fn sello_real(anclado: bool) -> SelloVerificado {
+    const TOKEN: &[u8] =
+        include_bytes!(concat!(env!("CARGO_MANIFEST_DIR"), "/tests/fijos/sello_digicert.tsr"));
+    const HASH: [u8; 32] = [
+        0xdd, 0xd5, 0x04, 0x70, 0x1c, 0x62, 0x4c, 0x96, 0x58, 0x26, 0xc7, 0x38, 0x75, 0xb6, 0x1e,
+        0x8d, 0x70, 0x07, 0x3d, 0x58, 0xf1, 0x7b, 0xc2, 0xe2, 0xd2, 0xc4, 0x15, 0x94, 0x59, 0x64,
+        0xf3, 0xc8,
+    ];
+    let datos = tunjo::sello_tiempo::verificar(TOKEN, &HASH).expect("el token de fijos es válido");
+
+    // El ancla se saca del propio token: aquí interesa obtener una `Confianza`
+    // ANCLADA de verdad para que el documento recorra esa rama, no probar la
+    // confianza —eso lo hace `tests/firma_cms.rs`.
+    let anclas: Vec<x509_cert::Certificate> = if anclado {
+        use cms::cert::CertificateChoices;
+        use der::Decode;
+        let ci = cms::content_info::ContentInfo::from_der(TOKEN).unwrap();
+        let sd: cms::signed_data::SignedData = ci.content.decode_as().unwrap();
+        sd.certificates
+            .unwrap()
+            .0
+            .iter()
+            .filter_map(|c| match c {
+                CertificateChoices::Certificate(c) => Some(c.clone()),
+                _ => None,
+            })
+            .filter(|c| c.tbs_certificate.subject.to_string().contains("Trusted Root G4"))
+            .collect()
+    } else {
+        Vec::new()
+    };
+    let confianza = tunjo::firma_cms::verificar_firma(TOKEN, &datos.fecha_utc, &anclas)
+        .expect("el token de fijos tiene firma válida");
+    assert_eq!(
+        confianza.acredita_autoridad(),
+        anclado,
+        "el ayudante debe producir el grado de confianza que promete, o la prueba \
+         que lo use no probaría lo que dice"
+    );
+    SelloVerificado::Valido(datos, confianza)
+}
+
+/// Las SEIS combinaciones de veredicto que el documento tiene que distinguir.
 fn combinaciones() -> Vec<(&'static str, ActaVerificada, SelloVerificado)> {
     vec![
         ("acta invalida", ActaVerificada::Invalida("no verifica".into()), SelloVerificado::Ausente),
-        (
-            "acta valida, sin sello",
-            ActaVerificada::Valida,
-            SelloVerificado::Ausente,
-        ),
+        ("acta valida, sin sello", ActaVerificada::Valida, SelloVerificado::Ausente),
         (
             "acta valida, sello invalido",
             ActaVerificada::Valida,
@@ -109,6 +157,9 @@ fn combinaciones() -> Vec<(&'static str, ActaVerificada, SelloVerificado)> {
             ActaVerificada::Invalida("no verifica".into()),
             SelloVerificado::Invalido("el token no lleva firmante".into()),
         ),
+        // Las dos que faltaban, y son las que más historial tienen.
+        ("acta valida, sello valido SIN anclar", ActaVerificada::Valida, sello_real(false)),
+        ("acta valida, sello valido ANCLADO", ActaVerificada::Valida, sello_real(true)),
     ]
 }
 
@@ -122,6 +173,28 @@ fn correr(args: &[&str]) -> Output {
 
 fn codigo(o: &Output) -> i32 {
     o.status.code().unwrap_or(-1)
+}
+
+
+/// Una cadena de custodia REAL sobre el acta dada, firmada con la misma clave.
+///
+/// Hace falta porque `custodia verificar --acta` era, hasta la sexta revisión, el
+/// comando que NINGUNA prueba del repositorio ejercía —y es donde vivieron las dos
+/// asimetrías de código de salida que la cuarta y la quinta encontraron—.
+fn cadena_sobre(acta: &Acta, dir: &Path) -> std::path::PathBuf {
+    let adquisicion = Evento {
+        tipo: "adquisicion".into(),
+        actor: "Perito de prueba".into(),
+        identificacion: "CC 000".into(),
+        rol: "perito".into(),
+        fecha_utc: "2026-07-30T08:00:00Z".into(),
+        reloj: "NO VERIFICADO".into(),
+        descripcion: "recogida del material".into(),
+    };
+    let cadena = custodia::iniciar(&acta.bytes_canonicos(), adquisicion, firmante());
+    let ruta = dir.join("cadena.json");
+    fs::write(&ruta, serde_json::to_vec_pretty(&cadena).unwrap()).unwrap();
+    ruta
 }
 
 // ----------------------------------------------- 1. los comandos deben coincidir
@@ -145,8 +218,15 @@ fn los_comandos_no_se_contradicen_sobre_un_acta_que_no_verifica() {
     escribir(&ruta, &acta);
     let r = ruta.to_str().unwrap();
 
+    // La cadena se construye sobre el acta YA alterada, así que su ancla cuadra y
+    // la cadena verifica ÍNTEGRA: es exactamente el caso en que el comando podría
+    // dar verde por la mitad que sí cuadra.
+    let cadena = cadena_sobre(&acta, dir.path());
+    let c = cadena.to_str().unwrap();
+
     let v = correr(&["verificar", r]);
     let a = correr(&["acta", r]);
+    let cv = correr(&["custodia", "verificar", "--cadena", c, "--acta", r]);
 
     assert_eq!(codigo(&v), 1, "`verificar` debe fallar:\n{}", texto(&v));
     assert_eq!(
@@ -154,6 +234,13 @@ fn los_comandos_no_se_contradicen_sobre_un_acta_que_no_verifica() {
         1,
         "`acta` NO puede ser más permisivo que `verificar` sobre el mismo archivo:\n{}",
         texto(&a)
+    );
+    assert_eq!(
+        codigo(&cv),
+        1,
+        "`custodia verificar --acta` NO puede ser más permisivo que los otros dos — es \
+         donde vivieron las dos asimetrías de la cuarta y la quinta ronda:\n{}",
+        texto(&cv)
     );
 }
 
@@ -167,10 +254,15 @@ fn los_comandos_coinciden_tambien_cuando_el_acta_es_buena() {
     escribir(&ruta, &acta);
     let r = ruta.to_str().unwrap();
 
+    let cadena = cadena_sobre(&acta, dir.path());
+    let c = cadena.to_str().unwrap();
+
     let v = correr(&["verificar", r]);
     let a = correr(&["acta", r]);
+    let cv = correr(&["custodia", "verificar", "--cadena", c, "--acta", r]);
     assert_eq!(codigo(&v), 0, "{}", texto(&v));
     assert_eq!(codigo(&a), 0, "{}", texto(&a));
+    assert_eq!(codigo(&cv), 0, "{}", texto(&cv));
 }
 
 // ------------------------------------- 2. la pantalla no se puede reescribir
@@ -339,4 +431,44 @@ fn ninguna_afirmacion_sobrevive_al_veredicto_que_la_desmiente() {
     );
     // Y sí se afirma lo que corresponde, o la prueba no discrimina.
     assert!(md.contains("**Comprobada.**"), "un acta válida sí afirma cobertura:\n{md}");
+}
+
+/// «Certificó» y «fecha cierta» aparecen SOLO con la autoridad acreditada.
+///
+/// Es la afirmación más fuerte del documento y la que tres rondas distintas
+/// consiguieron arrancarle sin derecho: la primera con un token sin firmante, la
+/// segunda leyéndola del JSON, y la cuarta con un sello válido pero SIN ANCLAR
+/// —que es lo que produce igual un autofirmado emitido hace un minuto—.
+#[test]
+fn la_fecha_cierta_se_afirma_solo_con_la_autoridad_acreditada() {
+    let dir = tempfile::tempdir().unwrap();
+    let acta = acta_firmada(dir.path());
+
+    let sin_anclar = informe::markdown(&acta, &ActaVerificada::Valida, &sello_real(false));
+    assert!(
+        !sin_anclar.contains("certificó"),
+        "un sello sin anclar no puede certificar nada:\n{sin_anclar}"
+    );
+    assert!(
+        sin_anclar.contains("NO está \nacreditada") || sin_anclar.contains("NO está acreditada"),
+        "y tiene que decir que la identidad no está acreditada:\n{sin_anclar}"
+    );
+
+    let anclado = informe::markdown(&acta, &ActaVerificada::Valida, &sello_real(true));
+    assert!(
+        anclado.contains("certificó"),
+        "con la autoridad acreditada SÍ se afirma, o esta prueba no discriminaría:\n{anclado}"
+    );
+
+    // Y con el acta inválida, ni siquiera anclado: el sello cubre el valor del
+    // campo de firma, no el cuerpo del acta.
+    let acta_mala = informe::markdown(
+        &acta,
+        &ActaVerificada::Invalida("no verifica".into()),
+        &sello_real(true),
+    );
+    assert!(
+        !acta_mala.contains("certificó"),
+        "si la firma del acta no verifica, «la firma de esta acta» no significa nada:\n{acta_mala}"
+    );
 }

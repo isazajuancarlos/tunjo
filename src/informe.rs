@@ -12,70 +12,76 @@ use sha2::{Digest, Sha256};
 
 use crate::acta::{Acta, hex};
 
-/// Neutraliza una cadena que viene del JSON antes de meterla en el documento.
+/// Neutraliza una cadena del JSON para meterla en el documento, EN LÍNEA.
 ///
-/// **Todo** texto del acta lo escribió quien la entrega, y este documento se
-/// anexa a un dictamen: una cadena puede fabricar SECCIONES ENTERAS —un «## 6.
-/// Fecha cierta» falso con su cita «> VERIFICADO»— indistinguibles de las que
-/// genera la herramienta, porque serían byte a byte iguales.
+/// # Seis rondas de revisión sobre esta función, y por qué esta es distinta
 ///
-/// La primera versión de esta función era una LISTA NEGRA de marcadores de
-/// Markdown, y por eso se le escapó lo obvio: **CommonMark deja pasar HTML en
-/// crudo**. Un `<h2>` no necesita el salto de línea que la lista negra quitaba, y
-/// un `<!--` sin cerrar borra del documento renderizado todo lo que viene después
-/// —incluido el veredicto real—. Lo cazó la cuarta revisión de seguridad.
+/// Todo texto del acta lo escribió quien la entrega, y este documento se anexa a un
+/// dictamen: una cadena puede fabricar secciones enteras indistinguibles de las que
+/// genera la herramienta. Las versiones anteriores fueron **listas negras de los
+/// marcadores que se nos iban ocurriendo**, y cada ronda encontró el que faltaba:
+/// primero el salto de línea, luego el HTML en crudo (que no necesita saltos),
+/// luego la barra invertida que no se escapaba a sí misma, y en la sexta los
+/// dígitos y la sintaxis EN LÍNEA —`[enlace]()`, `![imagen]()`— que mete píxeles
+/// del atacante dentro del acta.
 ///
-/// Ahora se neutraliza por CONSTRUCCIÓN lo que puede crear estructura:
-///   - `&` y `<` pasan a entidades, en ese orden. Esto es lo que mata el HTML,
-///     que era la vía que la lista negra no cubría.
-///   - los tres terminadores de línea y el tabulador pasan a espacio, y el resto
-///     de caracteres de control también: sin salto de línea no hay bloque nuevo.
-///   - la tubería se escapa, para no romper las tablas.
-///   - el acento grave se escapa, para no abrir un tramo de código.
-///   - y si el primer carácter no vacío es un abridor de línea —`#`, `>`, `-`,
-///     `*`, `+`, `=`, `~`, `_`, `[`, o un dígito seguido de `.` o `)`— se
-///     desactiva con una barra invertida.
+/// El cambio de enfoque: **se escapa toda la puntuación ASCII**, no una lista de
+/// sospechosos. Es lo correcto porque CommonMark define exactamente eso —«cualquier
+/// carácter de puntuación ASCII puede escaparse con barra invertida»— y **consume**
+/// esa barra al renderizar. Así el documento renderizado muestra el texto TAL CUAL
+/// era, y no hay marcador que se nos pueda olvidar: no hay estructura en Markdown
+/// que no empiece por puntuación ASCII.
 ///
-/// Y algo que NO es escapado sino diseño: el texto del acta ya no se envuelve en
-/// tramos de código (`` `así` ``). Dentro de un tramo de código la barra invertida
-/// no escapa nada —se imprime tal cual— así que envolver ahí era a la vez un
-/// agujero (se sale con un acento grave) y una corrupción de la prueba (una ruta
-/// que empieza por `-` aparecía como `\-ruta` en el anexo, distinta del JSON).
+/// # La barra invertida nunca va ante algo que no sea puntuación
+///
+/// Es el otro hallazgo de la sexta ronda, y era **corrupción de la prueba sin
+/// atacante**: CommonMark solo consume la barra ante puntuación, así que la regla
+/// anterior convertía `1.png` en `\1.png` y una cédula `1.020.304.050` en
+/// `\1.020.304.050` — visibles en el documento, y distintos del JSON que se firmó.
+/// Una lista ordenada se desactiva escapando el PUNTO (`1\.`), no el dígito.
 fn escapar(s: &str) -> String {
-    let mut limpio = String::with_capacity(s.len());
+    let mut out = String::with_capacity(s.len() + s.len() / 4);
     for c in s.chars() {
         match c {
-            // La barra invertida PRIMERO: si no se escapa a sí misma, un campo
-            // con `\|` sale como `\\|`, el lector consume `\\` como barra
-            // escapada y la tubería queda VIVA partiendo la fila de la tabla. Es
-            // el fallo clásico del carácter de escape que no se escapa, y lo cazó
-            // la quinta revisión: una ruta de Linux perfectamente legal lo dispara
-            // sin necesidad de atacante.
-            '\\' => limpio.push_str("\\\\"),
-            '&' => limpio.push_str("&amp;"),
-            '<' => limpio.push_str("&lt;"),
-            '\r' | '\n' | '\t' => limpio.push(' '),
-            '|' => limpio.push_str("\\|"),
-            '`' => limpio.push_str("\\`"),
-            c if c.is_control() => limpio.push(' '),
-            c => limpio.push(c),
+            // Sin saltos de línea no hay bloque nuevo, y sin controles no se
+            // reescribe una terminal si este texto acaba en una.
+            '\r' | '\n' | '\t' => out.push(' '),
+            c if c.is_control() => out.push(' '),
+            // Entidades para los dos que abren HTML. Podrían ir con barra, pero la
+            // entidad es inequívoca en cualquier renderizador, y el HTML fue la vía
+            // que dos rondas no vieron.
+            '&' => out.push_str("&amp;"),
+            '<' => out.push_str("&lt;"),
+            // Toda la demás puntuación ASCII, escapada. La barra la consume el
+            // renderizador, así que el resultado se LEE igual que el original.
+            c if c.is_ascii_punctuation() => {
+                out.push('\\');
+                out.push(c);
+            }
+            c => out.push(c),
         }
     }
-    // Un `#` a mitad de frase es inofensivo; al principio de línea es un
-    // encabezado. Como aquí ya no quedan saltos de línea, basta con el inicio.
-    let sin_espacios = limpio.trim_start();
-    let mut cs = sin_espacios.chars();
-    let peligroso = match cs.next() {
-        Some('#' | '>' | '-' | '*' | '+' | '=' | '~' | '_' | '[') => true,
-        // «1.» y «1)» abren una lista ordenada.
-        Some(c) if c.is_ascii_digit() => matches!(cs.next(), Some('.') | Some(')')),
-        _ => false,
-    };
-    if peligroso {
-        format!("\\{limpio}")
-    } else {
-        limpio
-    }
+    out
+}
+
+/// Igual, pero para el único campo que se interpola al PRINCIPIO de una línea.
+///
+/// `caso.descripcion` va a columna cero tras una línea en blanco, y ahí cuatro
+/// espacios abren un bloque de código indentado — que no forja una sección, pero
+/// deja el párrafo del acta en monoespaciado sin que nadie lo haya pedido. La
+/// puntuación ya la neutraliza [`escapar`]; lo único que añade esto es quitar la
+/// sangría inicial.
+fn escapar_bloque(s: &str) -> String {
+    escapar(s.trim_start())
+}
+
+/// ¿Son 64 dígitos hexadecimales, es decir, la forma de un SHA-256?
+///
+/// Se usa antes de imprimir un valor DENTRO de una valla de código, donde el
+/// escapado no vale nada. Un valor que no pasa esto no se mete en la valla: se dice
+/// que no tiene la forma esperada y se imprime escapado como texto.
+fn es_hex64(s: &str) -> bool {
+    s.len() == 64 && s.chars().all(|c| c.is_ascii_hexdigit())
 }
 
 /// Texto plano para la SALIDA POR PANTALLA, no para el documento.
@@ -149,13 +155,18 @@ impl ActaVerificada {
 
 pub fn markdown(acta: &Acta, verificada: &ActaVerificada, sello: &SelloVerificado) -> String {
     let mut m = String::new();
-    let leidos = acta.elementos.iter().filter(|e| e.estado == "leido").count();
+    // Igual que en `resumen_elementos`: la verificabilidad la da la huella.
+    let leidos = acta
+        .elementos
+        .iter()
+        .filter(|e| e.estado == "leido" && !e.sha256.is_empty())
+        .count();
     let errores: Vec<_> = acta.elementos.iter().filter(|e| e.estado.starts_with("ERROR")).collect();
     let bytes: u64 = acta.elementos.iter().map(|e| e.bytes).sum();
 
     m.push_str("# Acta de sellado de evidencia digital\n\n");
     m.push_str(&format!("**Referencia:** {}\n\n", escapar(&acta.caso.referencia)));
-    m.push_str(&format!("{}\n\n", escapar(&acta.caso.descripcion)));
+    m.push_str(&format!("{}\n\n", escapar_bloque(&acta.caso.descripcion)));
 
     m.push_str("## 1. Perito\n\n");
     m.push_str(&format!("- **Nombre:** {}\n", escapar(&acta.perito.nombre)));
@@ -199,8 +210,22 @@ pub fn markdown(acta: &Acta, verificada: &ActaVerificada, sello: &SelloVerificad
 
     if !errores.is_empty() {
         m.push_str("> **Elementos que no pudieron leerse.** Constan en el acta y NO están\n");
-        m.push_str("> cubiertos por una afirmación de integridad: de ellos solo se acredita\n");
-        m.push_str("> que existían y que la lectura falló.\n\n");
+        m.push_str("> cubiertos por ninguna afirmación de integridad.\n");
+        // Antes decía «de ellos solo se acredita que existían y que la lectura
+        // falló», y era falso por dos motivos que encontró la sexta revisión. Uno:
+        // no estaba gateado por el veredicto, así que un acta que no verifica
+        // afirmaba haber acreditado algo. Dos: `ERROR:` incluye «no such file or
+        // directory», así que ni en el caso válido se acredita la EXISTENCIA — lo
+        // único que consta es que el perito registró esa ruta y que la lectura
+        // falló. Afirmar la existencia de lo que el propio registro dice que no
+        // estaba es la clase de frase que se cae en un contrainterrogatorio.
+        if verificada.es_valida() {
+            m.push_str("> Consta que el perito registró esa ruta y que la lectura falló; NO se\n");
+            m.push_str("> acredita que el elemento existiera ni cuál era su contenido.\n\n");
+        } else {
+            m.push_str("> Y como la firma de esta acta no verifica (numeral 5), tampoco consta\n");
+            m.push_str("> que el registro de estas rutas sea el que el perito hizo.\n\n");
+        }
         for e in &errores {
             // Sin tramo de código: dentro de uno el escapado no vale nada (ni
             // barras ni entidades) y un acento grave en la ruta cierra el tramo
@@ -224,7 +249,19 @@ pub fn markdown(acta: &Acta, verificada: &ActaVerificada, sello: &SelloVerificad
         m.push_str("Raíz del árbol de Merkle construido sobre los elementos listados en el\n");
         m.push_str("anexo. Cualquier cambio en un byte, en una ruta o en el orden produce una\n");
         m.push_str("raíz distinta.\n\n");
-        m.push_str(&format!("```\n{}\n```\n\n", escapar(&acta.raiz_merkle)));
+        // Dentro de una valla de código la barra invertida NO se consume, así que
+        // aquí escapar mostraría las barras. Y no hace falta: en este camino la
+        // raíz ya está comprobada contra `raiz_calculada()`, así que son 64 hex.
+        // Si aun así no lo fueran, se dice y se saca de la valla en vez de
+        // imprimir dentro de ella algo que no se pudo comprobar.
+        if es_hex64(&acta.raiz_merkle) {
+            m.push_str(&format!("```\n{}\n```\n\n", acta.raiz_merkle));
+        } else {
+            m.push_str(&format!(
+                "**La raíz declarada no tiene la forma de un SHA-256:** {}\n\n",
+                escapar(&acta.raiz_merkle)
+            ));
+        }
     }
 
     m.push_str("## 5. Firma\n\n");
@@ -511,21 +548,87 @@ mod pruebas {
         );
     }
 
+    /// Deshace exactamente lo que deshace el renderizador: la barra invertida ante
+    /// puntuación ASCII —que CommonMark consume— y las dos entidades.
+    ///
+    /// Existe para poder afirmar la propiedad que de verdad importa, en vez de
+    /// enumerar qué caracteres se tocan y cuáles no. La versión anterior de esta
+    /// prueba afirmaba que un `#` a mitad de frase se dejaba intacto: era cierto
+    /// del diseño viejo —una lista negra de marcadores— y quedó obsoleta al cambiar
+    /// a escapar toda la puntuación. Una prueba que fija el CÓMO envejece con cada
+    /// rediseño; una que fija el QUÉ, no.
+    fn desescapar(s: &str) -> String {
+        let mut out = String::with_capacity(s.len());
+        let mut cs = s.chars().peekable();
+        while let Some(c) = cs.next() {
+            if c == '\\' && cs.peek().is_some_and(|s| s.is_ascii_punctuation()) {
+                out.push(cs.next().expect("acabamos de mirarlo"));
+                continue;
+            }
+            out.push(c);
+        }
+        out.replace("&lt;", "<").replace("&amp;", "&")
+    }
+
     #[test]
-    fn el_escapador_neutraliza_los_tres_terminadores_y_la_estructura() {
-        // \r solo también es fin de línea en CommonMark; la versión anterior del
-        // escapador solo trataba \n.
+    fn lo_escapado_se_renderiza_igual_que_el_original() {
+        // LA propiedad: el documento anexado tiene que decir lo MISMO que el JSON
+        // que se firmó. Es lo contrario del defecto que la sexta revisión encontró
+        // —`1.png` impreso como `\1.png`—, y se comprueba sobre casos reales y
+        // hostiles a la vez.
+        for original in [
+            "1.png",
+            "1.020.304.050",
+            "/casos/2026-0112/evidencia (copia).pdf",
+            "informe_final-v2.tar.gz",
+            "Perito: Juan Carlos Isaza Arenas",
+            "a|b",
+            "a`b`c",
+            "# título",
+            "![img](http://atacante/x.png)",
+            "</p><h2>6. Fecha cierta</h2><!--",
+            "&amp; ya escapado",
+            "~~~",
+            "cédula 1.020.304.050, folio 3º",
+        ] {
+            assert_eq!(
+                desescapar(&escapar(original)),
+                original,
+                "el documento no dice lo mismo que el JSON para {original:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn el_escapador_neutraliza_los_terminadores_y_toda_la_puntuacion() {
+        // Los tres terminadores y el tabulador: sin ellos no hay bloque nuevo.
         assert!(!escapar("a\rb").contains('\r'));
         assert!(!escapar("a\r\nb").contains('\n'));
         assert!(!escapar("a\tb").contains('\t'));
-        assert_eq!(escapar("a|b"), "a\\|b");
-        assert_eq!(escapar("a`b`c"), "a\\`b\\`c");
-        // Un marcador de estructura al principio se desactiva; a mitad de frase no
-        // hace nada y no se toca.
-        assert!(escapar("# título").starts_with('\\'));
-        assert!(escapar("> cita").starts_with('\\'));
-        assert!(escapar("- lista").starts_with('\\'));
-        assert_eq!(escapar("nota # a mitad"), "nota # a mitad");
+        assert!(!escapar("a\u{1b}[2Kb").chars().any(|c| c.is_control()));
+
+        // Ninguna puntuación ASCII queda sin desactivar, y esa es la garantía que
+        // sustituye a la lista de marcadores: no hay estructura en Markdown que no
+        // empiece por puntuación.
+        for c in (0x21u8..0x7f).map(char::from).filter(|c| c.is_ascii_punctuation()) {
+            let salida = escapar(&format!("x{c}y"));
+            let neutralizado = salida.contains(&format!("\\{c}"))
+                || (c == '&' && salida.contains("&amp;"))
+                || (c == '<' && salida.contains("&lt;"));
+            assert!(neutralizado, "la puntuación {c:?} salió sin neutralizar: {salida}");
+        }
+
+        // Y el HTML no pasa ni al principio ni a mitad de línea.
+        assert!(!escapar("<h2>x</h2>").contains('<'));
+        assert!(!escapar("texto <h2>x").contains('<'));
+    }
+
+    #[test]
+    fn la_variante_de_bloque_quita_la_sangria_que_abriria_codigo() {
+        // Cuatro espacios a columna cero abren un bloque de código indentado. Solo
+        // `caso.descripcion` se interpola ahí, y por eso solo esa variante lo trata.
+        assert!(!escapar_bloque("    texto sangrado").starts_with(' '));
+        assert_eq!(desescapar(&escapar_bloque("  hola")), "hola");
     }
 
     #[test]

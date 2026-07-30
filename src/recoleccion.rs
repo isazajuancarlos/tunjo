@@ -184,18 +184,42 @@ pub enum Discrepancia {
     NoVerificable { ruta: String, motivo: String },
 }
 
+/// Se sanea CADA CAMPO aquí dentro, no alrededor del `{d}` en quien imprime.
+///
+/// La sexta revisión encontró que el bloque de `--origen` imprimía esta lista en
+/// crudo, y era la QUINTA aparición de la misma clase: el saneo se aplicaba rama
+/// por rama en `main.rs` y siempre faltaba una. Un `ruta` con escapes de terminal
+/// borraba las líneas de ALTERADO y pintaba encima «material íntegro» — en el
+/// comando que el propio documento le dice al lector que ejecute.
+///
+/// Va por campo y no envolviendo el valor entero porque `Alterado` emite saltos de
+/// línea a propósito: aplanar el conjunto rompería la disposición que hace legible
+/// la comparación.
 impl std::fmt::Display for Discrepancia {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        // Local para no depender de otro módulo desde aquí: es la misma regla que
+        // `informe::plano` —todo carácter de control pasa a espacio— y su sitio
+        // natural es este, el punto donde el texto ajeno se convierte en salida.
+        let p = |s: &str| -> String {
+            s.chars().map(|c| if c.is_control() { ' ' } else { c }).collect()
+        };
         match self {
             Self::Alterado { ruta, esperado, encontrado } => write!(
                 f,
-                "ALTERADO   {ruta}\n           acta: {esperado}\n           disco: {encontrado}"
+                "ALTERADO   {}\n           acta: {}\n           disco: {}",
+                p(ruta),
+                p(esperado),
+                p(encontrado)
             ),
-            Self::Ausente { ruta } => write!(f, "AUSENTE    {ruta} (está en el acta, no en el disco)"),
-            Self::NoEstabaEnElActa { ruta } => {
-                write!(f, "AÑADIDO    {ruta} (está en el disco, no en el acta)")
+            Self::Ausente { ruta } => {
+                write!(f, "AUSENTE    {} (está en el acta, no en el disco)", p(ruta))
             }
-            Self::NoVerificable { ruta, motivo } => write!(f, "SIN LEER   {ruta}: {motivo}"),
+            Self::NoEstabaEnElActa { ruta } => {
+                write!(f, "AÑADIDO    {} (está en el disco, no en el acta)", p(ruta))
+            }
+            Self::NoVerificable { ruta, motivo } => {
+                write!(f, "SIN LEER   {}: {}", p(ruta), p(motivo))
+            }
         }
     }
 }

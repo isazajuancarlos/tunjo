@@ -162,6 +162,14 @@ pub enum ErrorActa {
     FirmaInvalida,
     SelloMalFormado,
     SelloNoCorresponde(String),
+    /// Un elemento se declara «leido» y no trae huella. No está atado a nada, y sin
+    /// esto el documento lo contaba como «con contenido verificable» y el numeral 1
+    /// de «Alcance y límites» acreditaba su contenido. La recolección NUNCA emite
+    /// ese estado —un archivo leído siempre lleva su SHA-256, incluso vacío—, así
+    /// que existe solo en un acta fabricada. Lo cazó la sexta revisión.
+    ElementoSinHuella {
+        ruta: String,
+    },
     /// El token sella lo que dice sellar, pero su firma CMS no se sostiene: sin
     /// firmante, con el certificado equivocado, o firmado por una clave que no es
     /// la del certificado que trae. Es distinto de `SelloNoCorresponde` —ahí el
@@ -184,6 +192,12 @@ impl std::fmt::Display for ErrorActa {
             Self::FirmaInvalida => write!(f, "la firma NO verifica contra la clave pública del acta"),
             Self::SelloMalFormado => write!(f, "el sello de tiempo no es base64 válido"),
             Self::SelloNoCorresponde(m) => write!(f, "{m}"),
+            Self::ElementoSinHuella { ruta } => write!(
+                f,
+                "el elemento «{}» se declara leído pero no trae huella: no está \
+                 cubierto por nada y el acta no puede acreditar su contenido",
+                ruta.chars().map(|c| if c.is_control() { ' ' } else { c }).collect::<String>()
+            ),
             Self::SelloSinFirmaValida(m) => write!(
                 f,
                 "el sello de tiempo no está correctamente firmado, así que no acredita \
@@ -281,6 +295,17 @@ impl Acta {
 
         if self.formato != FORMATO {
             return Err(ErrorActa::FormatoDesconocido(self.formato.clone()));
+        }
+        // Antes que la raíz y que la firma: un acta que declara contenido sin
+        // huella no acredita nada, y da igual que su firma cuadre. Fallar aquí es
+        // lo que impide que el documento afirme sobre ella (directiva de fallar en
+        // vez de suponer).
+        if let Some(e) = self
+            .elementos
+            .iter()
+            .find(|e| e.estado == "leido" && e.sha256.is_empty())
+        {
+            return Err(ErrorActa::ElementoSinHuella { ruta: e.ruta.clone() });
         }
         let calculada = self.raiz_calculada().ok_or(ErrorActa::SinElementos)?;
         if calculada != self.raiz_merkle {

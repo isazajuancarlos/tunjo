@@ -294,7 +294,12 @@ fn orden_sellar(
 }
 
 fn resumen_elementos(elementos: &[Elemento]) -> String {
-    let leidos = elementos.iter().filter(|e| e.estado == "leido").count();
+    // Por la EVIDENCIA, no por la declaración: «verificable» es una propiedad de
+    // la huella, no del estado. Un acta con un elemento «leido» sin huella ya no
+    // pasa `verificar_sello`, pero el conteo también se corrige aquí para que no
+    // dependa de que esa puerta siga puesta.
+    let leidos =
+        elementos.iter().filter(|e| e.estado == "leido" && !e.sha256.is_empty()).count();
     format!("{} elementos, {leidos} con contenido verificable", elementos.len())
 }
 
@@ -679,7 +684,9 @@ fn orden_custodia(accion: Custodia) -> Result<bool> {
                 custodia::Veredicto::ActaNoCorresponde { esperado, encontrado } => {
                     println!(
                         "✗ La cadena es íntegra pero ancla OTRA acta.\n  \
-                         esperado (acta dada): {esperado}\n  ancla de la cadena:   {encontrado}"
+                         esperado (acta dada): {}\n  ancla de la cadena:   {}",
+                        informe::plano(&esperado),
+                        informe::plano(&encontrado)
                     );
                     Ok(false)
                 }

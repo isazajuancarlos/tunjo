@@ -450,6 +450,18 @@ pub fn desde_json(texto: &str) -> Result<Cadena> {
     if cadena.formato != FORMATO_CADENA {
         bail!("formato de cadena desconocido: {:?}", cadena.formato);
     }
+    // `acta_sha256` es un HASH por definición, y hasta la sexta revisión era el
+    // único de la cadena que nadie validaba: `de_hex32` se aplicaba a `hash`, a
+    // `hash_anterior` y a `hash_eslabon`, y a este no. Siendo una cadena libre
+    // firmada dentro del génesis, servía para meter escapes de terminal en la
+    // salida de `custodia verificar`. Una cadena con un ancla que no es un hash no
+    // es «una cadena que ancla otra acta»: es una cadena mal formada.
+    if de_hex32(&cadena.acta_sha256).is_none() {
+        bail!(
+            "el ancla de la cadena no es un SHA-256 en hexadecimal: la cadena está \
+             mal formada"
+        );
+    }
     Ok(cadena)
 }
 
