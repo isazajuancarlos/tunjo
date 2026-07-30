@@ -45,6 +45,13 @@ fn escapar(s: &str) -> String {
     let mut limpio = String::with_capacity(s.len());
     for c in s.chars() {
         match c {
+            // La barra invertida PRIMERO: si no se escapa a sí misma, un campo
+            // con `\|` sale como `\\|`, el lector consume `\\` como barra
+            // escapada y la tubería queda VIVA partiendo la fila de la tabla. Es
+            // el fallo clásico del carácter de escape que no se escapa, y lo cazó
+            // la quinta revisión: una ruta de Linux perfectamente legal lo dispara
+            // sin necesidad de atacante.
+            '\\' => limpio.push_str("\\\\"),
             '&' => limpio.push_str("&amp;"),
             '<' => limpio.push_str("&lt;"),
             '\r' | '\n' | '\t' => limpio.push(' '),
@@ -163,7 +170,16 @@ pub fn markdown(acta: &Acta, verificada: &ActaVerificada, sello: &SelloVerificad
     m.push_str(&format!("- **Método:** {}\n", escapar(&acta.adquisicion.metodo)));
     m.push_str(&format!("- **Herramienta:** {}\n", escapar(&acta.adquisicion.herramienta)));
     m.push_str(&format!("- **Algoritmos:** {}\n", escapar(&acta.adquisicion.algoritmos)));
-    m.push_str("- **Acceso:** exclusivamente de lectura. La herramienta no escribe dentro del origen.\n\n");
+    // Esto es una propiedad de TUNJO cuando ÉL hizo la adquisición, no un hecho
+    // que este documento pueda afirmar de un acta que se limita a leer: si la
+    // escribió otro, «la herramienta» es la que diga el campo de arriba. Se
+    // atribuye en vez de afirmarse. Misma clase que el «no han cambiado desde
+    // entonces» de la ronda anterior. Quinta revisión.
+    m.push_str(
+        "- **Acceso declarado:** de solo lectura. Tunjo no escribe dentro del origen \n\
+         cuando es él quien adquiere; para un acta emitida por otra herramienta, esto \n\
+         es lo que declara el perito, no algo que este documento haya comprobado.\n\n",
+    );
 
     m.push_str("### Registro horario\n\n");
     m.push_str(&format!("- **Inicio (UTC):** {}\n", escapar(&acta.adquisicion.reloj.inicio_utc)));
@@ -186,7 +202,11 @@ pub fn markdown(acta: &Acta, verificada: &ActaVerificada, sello: &SelloVerificad
         m.push_str("> cubiertos por una afirmación de integridad: de ellos solo se acredita\n");
         m.push_str("> que existían y que la lectura falló.\n\n");
         for e in &errores {
-            m.push_str(&format!("> - `{}` — {}\n", escapar(&e.ruta), escapar(&e.estado)));
+            // Sin tramo de código: dentro de uno el escapado no vale nada (ni
+            // barras ni entidades) y un acento grave en la ruta cierra el tramo
+            // antes de tiempo. Se quitó en los demás sitios y este se escapó —
+            // precisamente el que ninguna prueba renderizaba. Quinta revisión.
+            m.push_str(&format!("> - {} — {}\n", escapar(&e.ruta), escapar(&e.estado)));
         }
         m.push('\n');
     }

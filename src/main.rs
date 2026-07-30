@@ -309,9 +309,19 @@ fn orden_verificar(
     match acta.verificar_sello() {
         Ok(()) => {
             println!("SELLO VÁLIDO");
-            println!("  referencia: {}", acta.caso.referencia);
-            println!("  perito:     {} ({})", acta.perito.nombre, acta.perito.identificacion);
-            println!("  adquirido:  {}", acta.adquisicion.reloj.inicio_utc);
+            // Todo campo del JSON pasa por `plano`. La firma que acaba de verificar
+            // es la del PROPIO autor del acta, no la de nadie de confianza: estos
+            // cuatro textos los elige quien la entrega, y un salto de línea con un
+            // «oculta lo siguiente» replicaba un veredicto anclado completo y
+            // escondía las líneas reales. Quinta revisión — el mismo hallazgo de la
+            // cuarta, una rama más allá.
+            println!("  referencia: {}", informe::plano(&acta.caso.referencia));
+            println!(
+                "  perito:     {} ({})",
+                informe::plano(&acta.perito.nombre),
+                informe::plano(&acta.perito.identificacion)
+            );
+            println!("  adquirido:  {}", informe::plano(&acta.adquisicion.reloj.inicio_utc));
             println!("  contenido:  {}", resumen_elementos(&acta.elementos));
             println!("  raíz:       {}", acta.raiz_merkle);
         }
@@ -381,7 +391,7 @@ fn orden_acta(ruta: PathBuf, salida: Option<PathBuf>, tsa_ca: Option<PathBuf>) -
     let verificada = match acta.verificar_sello() {
         Ok(()) => informe::ActaVerificada::Valida,
         Err(e) => {
-            eprintln!("AVISO: la firma de esta acta NO verifica ({e}).");
+            eprintln!("AVISO: la firma de esta acta NO verifica ({}).", informe::plano(&e.to_string()));
             informe::ActaVerificada::Invalida(e.to_string())
         }
     };
@@ -392,7 +402,7 @@ fn orden_acta(ruta: PathBuf, salida: Option<PathBuf>, tsa_ca: Option<PathBuf>) -
         Ok(Some((datos, confianza))) => informe::SelloVerificado::Valido(datos, confianza),
         Ok(None) => informe::SelloVerificado::Ausente,
         Err(e) => {
-            eprintln!("AVISO: el sello de tiempo de esta acta NO es válido ({e}).");
+            eprintln!("AVISO: el sello de tiempo de esta acta NO es válido ({}).", informe::plano(&e.to_string()));
             informe::SelloVerificado::Invalido(e.to_string())
         }
     };
@@ -540,12 +550,17 @@ fn orden_custodia(accion: Custodia) -> Result<bool> {
                         "✔ Cadena de custodia ÍNTEGRA: {} eslabones, firmas triple válidas, sin saltos ni reordenamientos.",
                         cadena.eslabones.len()
                     );
+                    // Se acumula y se decide AL FINAL. El retorno temprano que
+                    // puso la cuarta revisión se saltaba `estado_sello`, que es el
+                    // único sitio que detecta TRUNCADA — y para entonces ya se
+                    // había impreso «ÍNTEGRA». Quinta revisión.
+                    let mut bien = true;
                     if let Some(a) = &acta_cargada {
-                        // Antes decía «firmada por su mismo perito» sin haber
-                        // verificado NADA del acta: `custodia::verificar` solo
-                        // compara la clave como CADENA y el hash canónico. Un acta
-                        // con `firma: null` daba exit 0 aquí y exit 1 en
-                        // `tunjo verificar`. Cuarta revisión de seguridad.
+                        // `custodia::verificar` solo compara la clave como CADENA y
+                        // el hash canónico: no dice nada de si el acta está firmada
+                        // ni de si su sello vale. Se comprueban LAS DOS COSAS, o
+                        // este comando queda más permisivo que `tunjo verificar`
+                        // sobre el mismo archivo.
                         match a.verificar_sello() {
                             Ok(()) => println!(
                                 "  Y corresponde al acta, cuya firma SÍ verifica con la misma clave."
@@ -558,7 +573,23 @@ fn orden_custodia(accion: Custodia) -> Result<bool> {
                                 println!(
                                     "    La cadena está íntegra sobre un acta que no acredita nada."
                                 );
-                                return Ok(false);
+                                bien = false;
+                            }
+                        }
+                        match a.verificar_sello_tiempo(&anclas) {
+                            Ok(Some((_, c))) if c.acredita_autoridad() => {
+                                println!("  El sello de tiempo del ACTA es válido y está anclado.");
+                            }
+                            Ok(Some(_)) => println!(
+                                "  ⚠ El sello de tiempo del ACTA tiene firma válida pero SIN ANCLAR."
+                            ),
+                            Ok(None) => println!("  (El acta no lleva sello de tiempo propio.)"),
+                            Err(e) => {
+                                println!(
+                                    "  ✗ EL SELLO DE TIEMPO DEL ACTA NO ES VÁLIDO: {}",
+                                    informe::plano(&e.to_string())
+                                );
+                                bien = false;
                             }
                         }
                     } else {
@@ -570,13 +601,15 @@ fn orden_custodia(accion: Custodia) -> Result<bool> {
                     );
                     // La integridad prueba un PREFIJO; el sello de tiempo dice si
                     // ese prefijo es TODO lo que hubo. Sin sello no se puede saber.
-                    match custodia::estado_sello(&cadena, &anclas) {
+                    // El resultado se COMBINA con lo que dijo el acta: ninguna
+                    // mitad puede tapar el fallo de la otra.
+                    let sello_ok = match custodia::estado_sello(&cadena, &anclas) {
                         custodia::EstadoSello::Ausente => {
                             println!(
                                 "  Sin sello de tiempo: prueba el orden relativo, no la fecha ni que\n  \
                                  no falten eventos AL FINAL. Séllala con `tunjo custodia sello`."
                             );
-                            Ok(true)
+                            true
                         }
                         custodia::EstadoSello::Vigente { fecha_utc, secuencia, confianza } => {
                             if confianza.acredita_autoridad() {
@@ -598,7 +631,7 @@ fn orden_custodia(accion: Custodia) -> Result<bool> {
                                     confianza.autoridad()
                                 );
                             }
-                            Ok(true)
+                            true
                         }
                         custodia::EstadoSello::CubrePrefijo { fecha_utc, sellado, ultimo, confianza } => {
                             println!(
@@ -616,7 +649,7 @@ fn orden_custodia(accion: Custodia) -> Result<bool> {
                                     )
                                 }
                             );
-                            Ok(true)
+                            true
                         }
                         custodia::EstadoSello::Truncada { fecha_utc, sellado, ultimo, confianza } => {
                             // Se delata igual con sello anclado o sin anclar: la cadena
@@ -628,13 +661,16 @@ fn orden_custodia(accion: Custodia) -> Result<bool> {
                                 confianza.autoridad(),
                                 if confianza.acredita_autoridad() { ", anclado" } else { ", SIN anclar" }
                             );
-                            Ok(false)
+                            false
                         }
                         custodia::EstadoSello::Invalido { motivo } => {
                             println!("  ✗ El sello de tiempo NO es válido: {motivo}.");
-                            Ok(false)
+                            false
                         }
-                    }
+                    };
+                    // `bien` viene del acta; `sello_ok`, de la cadena. Un fallo en
+                    // cualquiera de los dos es un fallo del comando.
+                    Ok(bien && sello_ok)
                 }
                 custodia::Veredicto::Rota { secuencia, motivo } => {
                     println!("✗ Cadena ROTA en el eslabón {secuencia}: {motivo}.");
