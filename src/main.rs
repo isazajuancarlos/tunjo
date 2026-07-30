@@ -79,6 +79,12 @@ enum Orden {
         /// Contrasta además contra el contenido actual de esta ruta.
         #[arg(long)]
         origen: Option<PathBuf>,
+        /// PEM con el certificado de la autoridad de sellado en el que decides
+        /// confiar. Sin esto la firma del sello se comprueba igual, pero la
+        /// IDENTIDAD de la autoridad no queda acreditada y no se llama «fecha
+        /// cierta» a la fecha. No hay lista por defecto a propósito.
+        #[arg(long = "tsa-ca")]
+        tsa_ca: Option<PathBuf>,
     },
     /// Genera el acta legible (Markdown) a partir del JSON firmado.
     Acta {
@@ -171,6 +177,21 @@ fn leer_acta(ruta: &Path) -> Result<Acta> {
     let texto = std::fs::read_to_string(ruta)
         .with_context(|| format!("leyendo el acta {}", ruta.display()))?;
     serde_json::from_str(&texto).with_context(|| format!("el acta {} no es válida", ruta.display()))
+}
+
+/// Lee las anclas de confianza de `--tsa-ca`, o ninguna si no se pidieron.
+///
+/// Si se pidió y el archivo no sirve, se FALLA: quien pasa `--tsa-ca` está
+/// exigiendo ese control, y seguir sin él en silencio daría por acreditado lo que
+/// no lo está (directiva de fallar en vez de suponer).
+fn leer_anclas(ruta: Option<&Path>) -> Result<Vec<x509_cert::Certificate>> {
+    let Some(p) = ruta else {
+        return Ok(Vec::new());
+    };
+    let pem = std::fs::read_to_string(p)
+        .with_context(|| format!("leyendo las anclas {}", p.display()))?;
+    tunjo::firma_cms::anclas_desde_pem(&pem)
+        .with_context(|| format!("las anclas de {}", p.display()))
 }
 
 /// Variable con la que se automatiza el sellado por lotes.
@@ -273,7 +294,12 @@ fn resumen_elementos(elementos: &[Elemento]) -> String {
     format!("{} elementos, {leidos} con contenido verificable", elementos.len())
 }
 
-fn orden_verificar(ruta: PathBuf, origen: Option<PathBuf>) -> Result<bool> {
+fn orden_verificar(
+    ruta: PathBuf,
+    origen: Option<PathBuf>,
+    tsa_ca: Option<PathBuf>,
+) -> Result<bool> {
+    let anclas = leer_anclas(tsa_ca.as_deref())?;
     let acta = leer_acta(&ruta)?;
 
     match acta.verificar_sello() {
@@ -294,9 +320,24 @@ fn orden_verificar(ruta: PathBuf, origen: Option<PathBuf>) -> Result<bool> {
     // El sello de tiempo se verifica aparte y su ausencia NO invalida el acta:
     // es un límite declarado, no un defecto. Lo que sí invalida es llevar uno
     // que sella otra cosa.
-    match acta.verificar_sello_tiempo() {
-        Ok(Some(t)) => {
-            println!("  fecha cierta: {} (autoridad RFC 3161)", t.fecha_utc);
+    match acta.verificar_sello_tiempo(&anclas) {
+        Ok(Some((t, confianza))) => {
+            if confianza.acredita_autoridad() {
+                println!("  fecha cierta: {} (RFC 3161)", t.fecha_utc);
+                println!("  autoridad:    {} — anclada", confianza.autoridad());
+            } else {
+                // Firma válida pero anónima: no se llama «fecha cierta» a algo que
+                // un autofirmado produce igual.
+                println!(
+                    "  fecha:        {} — firma válida, pero SIN ANCLAR",
+                    t.fecha_utc
+                );
+                println!(
+                    "  autoridad:    «{}», identidad NO acreditada.\n\
+                     \x20               Exígela con `--tsa-ca <raíz.pem>`.",
+                    confianza.autoridad()
+                );
+            }
             println!("  política:     {}", t.politica);
         }
         Ok(None) => println!(
@@ -453,18 +494,7 @@ fn orden_custodia(accion: Custodia) -> Result<bool> {
             let texto = std::fs::read_to_string(&ruta)
                 .with_context(|| format!("leyendo la cadena {}", ruta.display()))?;
             let cadena = custodia::desde_json(&texto)?;
-            // Si se pide un ancla y el archivo no sirve, se falla aquí: quien pasó
-            // `--tsa-ca` está EXIGIENDO ese control, y seguir sin él en silencio
-            // daría por anclado lo que no lo está.
-            let anclas = match &tsa_ca {
-                Some(p) => {
-                    let pem = std::fs::read_to_string(p)
-                        .with_context(|| format!("leyendo las anclas {}", p.display()))?;
-                    tunjo::firma_cms::anclas_desde_pem(&pem)
-                        .with_context(|| format!("las anclas de {}", p.display()))?
-                }
-                None => Vec::new(),
-            };
+            let anclas = leer_anclas(tsa_ca.as_deref())?;
             // El acta se ata por CONTENIDO (sus bytes canónicos) y por AUTOR (la
             // clave pública de su perito): las dos viven mientras dura el match.
             let acta_cargada = match &acta {
@@ -632,7 +662,7 @@ fn main() -> ExitCode {
             salida,
         )
         .map(|_| true),
-        Orden::Verificar { acta, origen } => orden_verificar(acta, origen),
+        Orden::Verificar { acta, origen, tsa_ca } => orden_verificar(acta, origen, tsa_ca),
         Orden::Acta { acta, salida } => orden_acta(acta, salida).map(|_| true),
         Orden::Custodia { accion } => orden_custodia(accion),
     };

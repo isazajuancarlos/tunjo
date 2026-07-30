@@ -121,6 +121,9 @@ pub fn sellar(origen: &Path, sk: &TripleSigningKey, datos: &Datos) -> Result<Act
     // Comprobar el sello ANTES de entregarlo. Un acta que no se verifica a sí
     // misma no debe salir de aquí: el sitio donde se descubriría es la audiencia.
     acta.verificar_sello()?;
-    acta.verificar_sello_tiempo()?;
+    // Sin anclas: quien EMITE el acta no decide en quién debe confiar quien la
+    // recibe. Lo que sí se exige aquí es que el token venga firmado — si la
+    // autoridad devolvió algo que no acredita nada, el acta no sale.
+    acta.verificar_sello_tiempo(&[])?;
     Ok(acta)
 }

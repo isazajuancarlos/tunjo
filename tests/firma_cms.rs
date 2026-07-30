@@ -240,6 +240,68 @@ fn un_ancla_ajena_a_la_cadena_no_ancla() {
     );
 }
 
+// --------------------------------- el cableado: lo que ve `custodia verificar`
+
+/// Una cadena mínima con el sello que se le pase. Los eslabones no hacen falta:
+/// la firma del sello se comprueba ANTES de situarlo, y precisamente eso es lo
+/// que estas dos pruebas contrastan.
+fn cadena_con_sello(token_der: &[u8], hash_hex: &str) -> tunjo::custodia::Cadena {
+    use base64::Engine as _;
+    tunjo::custodia::Cadena {
+        formato: tunjo::custodia::FORMATO_CADENA.to_string(),
+        acta_sha256: "0".repeat(64),
+        clave_publica: String::new(),
+        eslabones: Vec::new(),
+        sello_final: Some(tunjo::custodia::SelloCadena {
+            secuencia: 0,
+            hash_eslabon: hash_hex.to_string(),
+            token_der_b64: base64::engine::general_purpose::STANDARD.encode(token_der),
+        }),
+    }
+}
+
+/// Hash que el token real sella, en hex: es lo que debe llevar `hash_eslabon`
+/// para que el sello llegue hasta la comprobación de la firma.
+const HASH_HEX: &str = "ddd504701c624c965826c73875b61e8d70073d58f17bc2e2d2c415945964f3c8";
+
+#[test]
+fn un_sello_forjado_deja_la_cadena_en_invalido() {
+    // El camino completo que recorre `custodia verificar`: si esto pasara, el
+    // programa imprimiría «fecha cierta» y saldría con 0 sobre un token que
+    // nadie firmó.
+    let mut sd = abrir(&token());
+    sd.signer_infos = SignerInfos(SetOfVec::new());
+    let cadena = cadena_con_sello(&reempaquetar(&sd), HASH_HEX);
+
+    match tunjo::custodia::estado_sello(&cadena, &[]) {
+        tunjo::custodia::EstadoSello::Invalido { motivo } => {
+            assert!(
+                motivo.contains("la firma del sello no vale"),
+                "debe rechazarse POR LA FIRMA, no por otra cosa: {motivo}"
+            );
+        }
+        otro => panic!("un sello sin firmante no puede dar {otro:?}"),
+    }
+}
+
+#[test]
+fn el_sello_autentico_llega_mas_alla_de_la_firma() {
+    // Control de la prueba de arriba: con el token AUTÉNTICO y la misma cadena
+    // vacía, el rechazo tiene que ser por los eslabones, no por la firma. Si las
+    // dos fallaran igual, la prueba anterior no probaría nada.
+    let cadena = cadena_con_sello(&token(), HASH_HEX);
+    match tunjo::custodia::estado_sello(&cadena, &[]) {
+        tunjo::custodia::EstadoSello::Invalido { motivo } => {
+            assert!(
+                !motivo.contains("la firma del sello no vale"),
+                "la firma auténtica no debe ser el motivo: {motivo}"
+            );
+            assert!(motivo.contains("sin eslabones"), "{motivo}");
+        }
+        otro => panic!("con la cadena vacía se esperaba Invalido por eslabones: {otro:?}"),
+    }
+}
+
 // -------------------------------------------------------------------- anclas PEM
 
 #[test]
