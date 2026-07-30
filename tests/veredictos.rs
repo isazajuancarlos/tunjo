@@ -36,7 +36,7 @@ use std::sync::OnceLock;
 use quipu::pqsign::{TripleSigningKey, generate_triple_keypair};
 use base64::{Engine, engine::general_purpose::STANDARD};
 use tunjo::acta::{Acta, Firma};
-use tunjo::informe::{self, ActaVerificada, SelloVerificado};
+use tunjo::informe::{self, ActaVerificada, SelloVerificado, dice, dicho};
 use tunjo::custodia::{self, Evento};
 use tunjo::sellado::{self, Datos};
 
@@ -406,31 +406,34 @@ fn ninguna_afirmacion_sobrevive_al_veredicto_que_la_desmiente() {
             &ActaVerificada::Invalida("la firma NO verifica".into()),
             &sello,
         );
-        assert!(md.contains("ESTA ACTA NO VERIFICA"), "[{nombre}] falta el aviso:\n{md}");
+        // Se casa contra las CONSTANTES de `informe::dicho`, no contra copias del
+        // texto: una copia deja de comprobar nada en cuanto alguien reflúa el
+        // párrafo, y eso ya pasó en esta rama. Noveno hallazgo de la sexta ronda.
+        assert!(dice(&md, dicho::RAIZ.sin()), "[{nombre}] falta el aviso:\n{md}");
         assert!(
-            !md.contains("produce una\nraíz distinta"),
+            !dice(&md, dicho::RAIZ.con()),
             "[{nombre}] afirma integridad de un acta que no verifica"
         );
         assert!(
-            !md.contains("**Comprobada.**"),
+            !dice(&md, dicho::FIRMA_COBERTURA.con()),
             "[{nombre}] afirma cobertura de una firma que no verifica"
         );
         // §8 numeral 1: el defecto 2 de la quinta ronda.
         assert!(
-            !md.contains("Acredita que los elementos listados tenían exactamente"),
+            !dice(&md, dicho::ALCANCE_1.con()),
             "[{nombre}] el numeral 1 sigue acreditando el contenido:\n{md}"
         );
     }
 
     // (b) Acta válida SIN sello: no se habla de fecha cierta.
     let md = informe::markdown(&acta, &ActaVerificada::Valida, &SelloVerificado::Ausente);
-    assert!(md.contains("NO lleva sello de tiempo"), "{md}");
+    assert!(dice(&md, dicho::FECHA_AUSENTE.texto()), "{md}");
     assert!(
-        !md.contains("autoridad de sellado independiente certificó"),
+        !dice(&md, dicho::FECHA_CIERTA.texto()),
         "sin sello no se puede certificar nada:\n{md}"
     );
     // Y sí se afirma lo que corresponde, o la prueba no discrimina.
-    assert!(md.contains("**Comprobada.**"), "un acta válida sí afirma cobertura:\n{md}");
+    assert!(dice(&md, dicho::FIRMA_COBERTURA.con()), "un acta válida sí afirma cobertura:\n{md}");
 }
 
 /// «Certificó» y «fecha cierta» aparecen SOLO con la autoridad acreditada.
@@ -446,19 +449,24 @@ fn la_fecha_cierta_se_afirma_solo_con_la_autoridad_acreditada() {
 
     let sin_anclar = informe::markdown(&acta, &ActaVerificada::Valida, &sello_real(false));
     assert!(
-        !sin_anclar.contains("certificó"),
+        !dice(&sin_anclar, dicho::FECHA_CIERTA.texto()),
         "un sello sin anclar no puede certificar nada:\n{sin_anclar}"
     );
     assert!(
-        sin_anclar.contains("NO está \nacreditada") || sin_anclar.contains("NO está acreditada"),
+        dice(&sin_anclar, dicho::FECHA_SIN_AUTORIDAD.texto()),
         "y tiene que decir que la identidad no está acreditada:\n{sin_anclar}"
+    );
+    assert!(
+        dice(&sin_anclar, dicho::SELLO_ACREDITACION.sin()),
+        "el alcance tiene que decir que no comprobó a quién pertenece:\n{sin_anclar}"
     );
 
     let anclado = informe::markdown(&acta, &ActaVerificada::Valida, &sello_real(true));
     assert!(
-        anclado.contains("certificó"),
+        dice(&anclado, dicho::FECHA_CIERTA.texto()),
         "con la autoridad acreditada SÍ se afirma, o esta prueba no discriminaría:\n{anclado}"
     );
+    assert!(dice(&anclado, dicho::SELLO_ACREDITACION.con()), "{anclado}");
 
     // Y con el acta inválida, ni siquiera anclado: el sello cubre el valor del
     // campo de firma, no el cuerpo del acta.
@@ -468,7 +476,72 @@ fn la_fecha_cierta_se_afirma_solo_con_la_autoridad_acreditada() {
         &sello_real(true),
     );
     assert!(
-        !acta_mala.contains("certificó"),
+        !dice(&acta_mala, dicho::FECHA_CIERTA.texto()),
         "si la firma del acta no verifica, «la firma de esta acta» no significa nada:\n{acta_mala}"
     );
+    assert!(
+        dice(&acta_mala, dicho::FECHA_SOLO_EL_CAMPO.texto()),
+        "y tiene que decir qué es lo único que el sello sí dice:\n{acta_mala}"
+    );
+}
+
+/// Lo que el documento dice del TOKEN no depende de la firma del ACTA.
+///
+/// Son dos comprobaciones distintas y el bloque «Alcance de esta comprobación»
+/// describe la primera. Cuando el alcance colgaba de la condición del acta, un acta
+/// rota con un sello impecablemente anclado salía diciendo que no se había
+/// comprobado a quién pertenece el certificado — y eso es falso: sí se comprobó.
+/// Es la misma clase de defecto que las seis rondas, en la dirección contraria: una
+/// negación sin respaldo también es una afirmación sin respaldo.
+#[test]
+fn el_alcance_del_token_no_depende_de_la_firma_del_acta() {
+    let dir = tempfile::tempdir().unwrap();
+    let acta = acta_firmada(dir.path());
+
+    for (nombre, ver) in [
+        ("acta íntegra", ActaVerificada::Valida),
+        ("acta rota", ActaVerificada::Invalida("no verifica".into())),
+    ] {
+        let md = informe::markdown(&acta, &ver, &sello_real(true));
+        assert!(
+            dice(&md, dicho::SELLO_ACREDITACION.con()),
+            "[{nombre}] el ancla SÍ se comprobó, lo diga lo que diga la firma del acta:\n{md}"
+        );
+        assert!(!dice(&md, dicho::SELLO_ACREDITACION.sin()), "[{nombre}]:\n{md}");
+    }
+
+    // Y sin ancla, la negativa — o la prueba no discriminaría.
+    let md = informe::markdown(&acta, &ActaVerificada::Valida, &sello_real(false));
+    assert!(dice(&md, dicho::SELLO_ACREDITACION.sin()), "{md}");
+}
+
+/// El numeral 4 del §8 no puede remitir a una §6 que dice otra cosa.
+///
+/// Las dos dependen de la MISMA condición —`FechaCierta`: autoridad acreditada Y
+/// acta íntegra— desde el rediseño. Antes el numeral 4 solo exigía la autoridad
+/// acreditada, así que con el acta rota afirmaba «lo que una autoridad
+/// independiente certifica (numeral 6)» mientras el numeral 6 decía expresamente
+/// que no certificaba nada del acta. Una condición compartida no se desincroniza.
+#[test]
+fn el_numeral_cuatro_y_la_seccion_seis_no_se_pueden_contradecir() {
+    let dir = tempfile::tempdir().unwrap();
+    let acta = acta_firmada(dir.path());
+
+    for (nombre, ver, sello, remite) in [
+        ("anclado + acta íntegra", ActaVerificada::Valida, sello_real(true), true),
+        ("anclado + acta rota", ActaVerificada::Invalida("no".into()), sello_real(true), false),
+        ("sin anclar", ActaVerificada::Valida, sello_real(false), false),
+        ("sin sello", ActaVerificada::Valida, SelloVerificado::Ausente, false),
+    ] {
+        let md = informe::markdown(&acta, &ver, &sello);
+        assert_eq!(
+            dice(&md, dicho::ALCANCE_4.con()),
+            remite,
+            "[{nombre}] el numeral 4 remite a una certificación que la §6 no hace:\n{md}"
+        );
+        // Y si remite, la §6 tiene que estar diciéndolo de verdad.
+        if remite {
+            assert!(dice(&md, dicho::FECHA_CIERTA.texto()), "[{nombre}]:\n{md}");
+        }
+    }
 }

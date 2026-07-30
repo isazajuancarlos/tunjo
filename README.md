@@ -104,6 +104,16 @@ El acta legible lleva las **huellas** de la clave y de la firma, no sus valores
 completos: la firma triple ocupa 46 KB en base64 y nadie coteja eso en papel. La
 verificación se hace sobre el JSON; el Markdown es para leer.
 
+**Ninguna frase del documento afirma nada que no se haya comprobado.** No es una
+promesa de redacción cuidadosa: el generador está construido para que no se pueda
+escribir. Cada afirmación sobre el acta lleva en su *tipo* la comprobación que la
+sostiene, y va obligatoriamente acompañada de lo que se dice cuando esa
+comprobación falla —el silencio no es una opción, porque un acta que no verifica
+es precisamente la que alguien querría presentar como buena—. Y ningún texto del
+JSON llega al documento sin neutralizar, porque no hay forma de interpolarlo sin
+pasar por el escapado. Un acta cuya firma no verifica genera igual su documento,
+pero el documento dice, en cada numeral, que no acredita nada.
+
 ## Cadena de custodia: la secuencia, no solo el instante
 
 El acta prueba un **instante**: «esto existía en T0, con esta raíz Merkle,

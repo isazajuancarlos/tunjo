@@ -294,13 +294,15 @@ fn orden_sellar(
 }
 
 fn resumen_elementos(elementos: &[Elemento]) -> String {
-    // Por la EVIDENCIA, no por la declaración: «verificable» es una propiedad de
-    // la huella, no del estado. Un acta con un elemento «leido» sin huella ya no
-    // pasa `verificar_sello`, pero el conteo también se corrige aquí para que no
-    // dependa de que esa puerta siga puesta.
-    let leidos =
-        elementos.iter().filter(|e| e.estado == "leido" && !e.sha256.is_empty()).count();
-    format!("{} elementos, {leidos} con contenido verificable", elementos.len())
+    // La regla de qué es «verificable» —por la EVIDENCIA y no por el estado
+    // declarado— vive en UN sitio, `informe::verificables`. Estuvo copiada aquí y
+    // en el generador del documento, y esa es la forma en que dos conteos que
+    // deberían decir lo mismo se separan sin que nadie lo note.
+    format!(
+        "{} elementos, {} con contenido verificable",
+        elementos.len(),
+        informe::verificables(elementos)
+    )
 }
 
 fn orden_verificar(
