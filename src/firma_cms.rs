@@ -224,7 +224,11 @@ pub fn verificar_firma(
 
     exigir_vigencia(cert, instante_utc)?;
 
-    let autoridad = cert.tbs_certificate.subject.to_string();
+    // Neutralizado AQUÍ, donde nace, y no en cada sitio que lo imprima. Hoy el
+    // `Display` de `x509-cert` escapa los controles en hexadecimal conforme a
+    // RFC 4514, así que no era explotable — pero esa garantía vivía en el código de
+    // un tercero y no se podía leer en el nuestro. Séptima revisión.
+    let autoridad = crate::texto::plano(&cert.tbs_certificate.subject.to_string());
     match anclar(cert, &certificados, anclas, instante_utc)? {
         Some(ancla) => Ok(Confianza::Anclada { autoridad, ancla }),
         None => Ok(Confianza::SinAnclar { autoridad }),
@@ -568,7 +572,8 @@ fn anclar(
                 && firma_de_certificado_valida(&actual, ancla).is_ok()
             {
                 exigir_vigencia(ancla, instante_utc)?;
-                return Ok(Some(ancla.tbs_certificate.subject.to_string()));
+                // Mismo motivo que en `autoridad`: se neutraliza donde nace.
+                return Ok(Some(crate::texto::plano(&ancla.tbs_certificate.subject.to_string())));
             }
         }
         // ¿El ancla ES el certificado actual? Aquí NO se exige poder emitir: el

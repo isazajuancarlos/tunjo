@@ -134,13 +134,11 @@ fn huella(b64: &str) -> String {
 
 /// Texto plano para la SALIDA POR PANTALLA, no para el documento.
 ///
-/// El acta legible se escapaba y la salida del programa no, y ahí vive el
-/// veredicto que lee una persona: un `\u{1b}[2K` dentro de un campo del JSON borra
-/// la línea que acaba de imprimirse y pinta encima «SELLO VÁLIDO». El código de
-/// salida seguía siendo 1, pero nadie frente a un prompt lo mira. Cuarta revisión.
-pub fn plano(s: &str) -> String {
-    s.chars().map(|c| if c.is_control() { ' ' } else { c }).collect()
-}
+/// Vive en [`crate::texto`] desde que la verificación del sello trajo una fuente de
+/// texto ajeno que no viene del acta —el certificado de la autoridad— y `firma_cms`
+/// necesitó neutralizarlo sin depender del generador de informes. Se reexporta aquí
+/// porque este era su sitio y hay llamadas por todo `main.rs`.
+pub use crate::texto::plano;
 
 /// Cuántos elementos tienen contenido **verificable**, contado por la EVIDENCIA.
 ///

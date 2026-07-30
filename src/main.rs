@@ -523,9 +523,20 @@ fn orden_custodia(accion: Custodia) -> Result<bool> {
             std::fs::write(&ruta, serde_json::to_vec_pretty(&cadena)?)?;
             let n = cadena.eslabones.len();
             println!(
+                // Decía «desde ahora, entregar la cadena recortada por el final se
+                // detecta al verificar», y prometía más que el README y más que el
+                // propio verificador: quien recorta la cadena puede quitar también
+                // el sello, y entonces se ve «sin sello», no «truncada». El sello
+                // tiene que VIAJAR con la cadena o estar publicado. La séptima
+                // revisión lo dejó como residual informativo; se cierra aquí porque
+                // una herramienta que acredita no puede decir de más en su propia
+                // salida. Es la misma regla que el documento: nada que no se pueda
+                // sostener.
                 "Sello de tiempo puesto sobre el eslabón {} (el último de {n}).\n  \
                  fecha cierta: {} — {}\n  \
-                 Desde ahora, entregar la cadena recortada por el final se detecta al verificar.",
+                 Una cadena recortada por el final se detecta al verificar MIENTRAS el\n  \
+                 sello llegue con ella: quien la recorta puede quitarlo también, y\n  \
+                 entonces se verá «sin sello». Entrégalo junto a la cadena o publícalo.",
                 n - 1,
                 datos.fecha_utc,
                 sello

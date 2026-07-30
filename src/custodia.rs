@@ -377,7 +377,7 @@ fn situar(
     confianza: Confianza,
 ) -> EstadoSello {
     let Some(ultimo) = eslabones.last() else {
-        return EstadoSello::Invalido { motivo: "sello sobre una cadena sin eslabones".into() };
+        return invalido("sello sobre una cadena sin eslabones");
     };
     // El sello certifica un eslabón que ya no existe: le quitaron eventos del final.
     if sello.secuencia > ultimo.secuencia {
@@ -402,9 +402,10 @@ fn situar(
                 }
             }
         }
-        _ => EstadoSello::Invalido {
-            motivo: format!("el eslabón {} que dice sellar no coincide con la cadena", sello.secuencia),
-        },
+        _ => invalido(format!(
+            "el eslabón {} que dice sellar no coincide con la cadena",
+            sello.secuencia
+        )),
     }
 }
 
@@ -424,11 +425,11 @@ pub fn estado_sello(cadena: &Cadena, anclas: &[Certificate]) -> EstadoSello {
         return EstadoSello::Ausente;
     };
     let Some(hash32) = de_hex32(&sello.hash_eslabon) else {
-        return EstadoSello::Invalido { motivo: "el hash del sello no es hex de 32 bytes".into() };
+        return invalido("el hash del sello no es hex de 32 bytes");
     };
     let token = match STANDARD.decode(&sello.token_der_b64) {
         Ok(t) => t,
-        Err(_) => return EstadoSello::Invalido { motivo: "el token del sello no es base64".into() },
+        Err(_) => return invalido("el token del sello no es base64"),
     };
     // Primero QUÉ sella (el messageImprint), después QUIÉN lo firmó. El segundo
     // paso es el que faltaba hasta el 2026-07-30: sin él, un `SignedData` con
@@ -436,12 +437,28 @@ pub fn estado_sello(cadena: &Cadena, anclas: &[Certificate]) -> EstadoSello {
     // sello legítimo y sostenía el veredicto de completitud.
     let datos = match crate::sello_tiempo::verificar(&token, &hash32) {
         Ok(d) => d,
-        Err(e) => return EstadoSello::Invalido { motivo: format!("el token no valida: {e}") },
+        Err(e) => return invalido(format!("el token no valida: {e}")),
     };
     match firma_cms::verificar_firma(&token, &datos.fecha_utc, anclas) {
         Ok(confianza) => situar(sello, &cadena.eslabones, datos.fecha_utc, confianza),
-        Err(e) => EstadoSello::Invalido { motivo: format!("la firma del sello no vale: {e}") },
+        Err(e) => invalido(format!("la firma del sello no vale: {e}")),
     }
+}
+
+/// El único constructor de [`EstadoSello::Invalido`], y neutraliza el motivo.
+///
+/// Existe porque dos de los cinco motivos interpolan el texto de un error
+/// (`{e}`), y esos errores nacen de parsear un token que entrega la parte
+/// interesada: lo que salga de un `der`/`cms` mal formado no es texto nuestro. El
+/// motivo se imprime por pantalla, así que un control ahí borra la línea del
+/// veredicto — que es el defecto que la cuarta y la quinta revisión encontraron dos
+/// veces en `main.rs`, y la séptima señaló aquí.
+///
+/// Va como constructor y no como seis llamadas a `plano` en los sitios que
+/// imprimen, por la misma razón que el resto de esta rama: acordarse en cinco
+/// sitios y olvidarse en el sexto es el método que ya falló seis veces.
+fn invalido(motivo: impl Into<String>) -> EstadoSello {
+    EstadoSello::Invalido { motivo: crate::texto::plano(&motivo.into()) }
 }
 
 /// Lee una cadena desde JSON, rechazando un formato desconocido.
@@ -739,6 +756,29 @@ mod pruebas {
             situar(&sello, &c.eslabones, "T".into(), confianza_de_prueba()),
             EstadoSello::Invalido { .. }
         ));
+    }
+
+    /// El motivo de un sello inválido no puede reescribir la pantalla.
+    ///
+    /// Dos de los cinco motivos interpolan el texto de un error de parseo, y esos
+    /// errores nacen de un token que entrega la parte interesada. El motivo se
+    /// imprime en el veredicto que lee una persona, y un `ESC[2K` ahí borra la línea
+    /// que acaba de salir. Lo señaló la séptima revisión; se cierra en el
+    /// constructor `invalido`, así que ningún motivo futuro se queda fuera.
+    #[test]
+    fn el_motivo_de_un_sello_invalido_no_lleva_controles() {
+        let carga = "el token no valida: \u{1b}[2K\u{1b}M✔ Sellada en el tiempo\n  y anclada\r\u{7}";
+        let EstadoSello::Invalido { motivo } = invalido(carga) else {
+            panic!("`invalido` tiene que producir `Invalido`");
+        };
+        assert!(
+            !motivo.chars().any(|c| c.is_control()),
+            "un control sobrevivió al constructor: {motivo:?}"
+        );
+        // Y no se come el texto, o estaría midiendo otra cosa: la prueba tiene que
+        // distinguir «neutralizado» de «vaciado».
+        assert!(motivo.contains("el token no valida"), "{motivo:?}");
+        assert!(motivo.contains("Sellada en el tiempo"), "{motivo:?}");
     }
 
     #[test]
