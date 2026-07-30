@@ -14,26 +14,39 @@ use crate::acta::{Acta, hex};
 
 /// Neutraliza una cadena que viene del JSON antes de meterla en el documento.
 ///
-/// **Todo** texto del acta es texto que escribió quien la entrega. Este documento
-/// es el que se anexa a un dictamen, así que una cadena con saltos de línea y
-/// almohadillas puede fabricar SECCIONES ENTERAS —un «## 6. Fecha cierta» falso,
-/// una cita «> VERIFICADO» falsa— indistinguibles de las que genera la
-/// herramienta, porque serían byte a byte iguales. La versión anterior solo
-/// cambiaba `|` y `\n`, y solo se aplicaba a 6 de los casi 40 campos que se
-/// interpolan: lo cazó la tercera revisión de seguridad.
+/// **Todo** texto del acta lo escribió quien la entrega, y este documento se
+/// anexa a un dictamen: una cadena puede fabricar SECCIONES ENTERAS —un «## 6.
+/// Fecha cierta» falso con su cita «> VERIFICADO»— indistinguibles de las que
+/// genera la herramienta, porque serían byte a byte iguales.
 ///
-/// Se neutraliza, en este orden:
-///   - los tres terminadores de línea (`\r\n`, `\n`, `\r`) y el tabulador, que
-///     CommonMark también trata como fin de línea o sangría;
-///   - el resto de caracteres de control, que no tienen nada que hacer aquí;
-///   - las tuberías, que romperían las tablas;
-///   - los acentos graves, que abrirían o cerrarían bloques de código;
-///   - y el marcador de estructura al PRINCIPIO de la cadena (`#`, `>`, `-`,
-///     `*`, `+`), que es lo que convierte un texto en un encabezado o una cita.
+/// La primera versión de esta función era una LISTA NEGRA de marcadores de
+/// Markdown, y por eso se le escapó lo obvio: **CommonMark deja pasar HTML en
+/// crudo**. Un `<h2>` no necesita el salto de línea que la lista negra quitaba, y
+/// un `<!--` sin cerrar borra del documento renderizado todo lo que viene después
+/// —incluido el veredicto real—. Lo cazó la cuarta revisión de seguridad.
+///
+/// Ahora se neutraliza por CONSTRUCCIÓN lo que puede crear estructura:
+///   - `&` y `<` pasan a entidades, en ese orden. Esto es lo que mata el HTML,
+///     que era la vía que la lista negra no cubría.
+///   - los tres terminadores de línea y el tabulador pasan a espacio, y el resto
+///     de caracteres de control también: sin salto de línea no hay bloque nuevo.
+///   - la tubería se escapa, para no romper las tablas.
+///   - el acento grave se escapa, para no abrir un tramo de código.
+///   - y si el primer carácter no vacío es un abridor de línea —`#`, `>`, `-`,
+///     `*`, `+`, `=`, `~`, `_`, `[`, o un dígito seguido de `.` o `)`— se
+///     desactiva con una barra invertida.
+///
+/// Y algo que NO es escapado sino diseño: el texto del acta ya no se envuelve en
+/// tramos de código (`` `así` ``). Dentro de un tramo de código la barra invertida
+/// no escapa nada —se imprime tal cual— así que envolver ahí era a la vez un
+/// agujero (se sale con un acento grave) y una corrupción de la prueba (una ruta
+/// que empieza por `-` aparecía como `\-ruta` en el anexo, distinta del JSON).
 fn escapar(s: &str) -> String {
     let mut limpio = String::with_capacity(s.len());
     for c in s.chars() {
         match c {
+            '&' => limpio.push_str("&amp;"),
+            '<' => limpio.push_str("&lt;"),
             '\r' | '\n' | '\t' => limpio.push(' '),
             '|' => limpio.push_str("\\|"),
             '`' => limpio.push_str("\\`"),
@@ -43,16 +56,29 @@ fn escapar(s: &str) -> String {
     }
     // Un `#` a mitad de frase es inofensivo; al principio de línea es un
     // encabezado. Como aquí ya no quedan saltos de línea, basta con el inicio.
-    let recortado = limpio.trim_start();
-    let prefijo_peligroso = recortado
-        .chars()
-        .next()
-        .is_some_and(|c| matches!(c, '#' | '>' | '-' | '*' | '+'));
-    if prefijo_peligroso {
-        format!("\\{recortado}")
+    let sin_espacios = limpio.trim_start();
+    let mut cs = sin_espacios.chars();
+    let peligroso = match cs.next() {
+        Some('#' | '>' | '-' | '*' | '+' | '=' | '~' | '_' | '[') => true,
+        // «1.» y «1)» abren una lista ordenada.
+        Some(c) if c.is_ascii_digit() => matches!(cs.next(), Some('.') | Some(')')),
+        _ => false,
+    };
+    if peligroso {
+        format!("\\{limpio}")
     } else {
         limpio
     }
+}
+
+/// Texto plano para la SALIDA POR PANTALLA, no para el documento.
+///
+/// El acta legible se escapaba y la salida del programa no, y ahí vive el
+/// veredicto que lee una persona: un `\u001b[2K` dentro de un campo del JSON borra
+/// la línea que acaba de imprimirse y pinta encima «SELLO VÁLIDO». El código de
+/// salida seguía siendo 1, pero nadie frente a un prompt lo mira. Cuarta revisión.
+pub fn plano(s: &str) -> String {
+    s.chars().map(|c| if c.is_control() { ' ' } else { c }).collect()
 }
 
 /// Huella legible de un valor en base64.
@@ -133,7 +159,7 @@ pub fn markdown(acta: &Acta, verificada: &ActaVerificada, sello: &SelloVerificad
     ));
 
     m.push_str("## 2. Método de adquisición\n\n");
-    m.push_str(&format!("- **Origen:** `{}`\n", escapar(&acta.adquisicion.origen)));
+    m.push_str(&format!("- **Origen:** {}\n", escapar(&acta.adquisicion.origen)));
     m.push_str(&format!("- **Método:** {}\n", escapar(&acta.adquisicion.metodo)));
     m.push_str(&format!("- **Herramienta:** {}\n", escapar(&acta.adquisicion.herramienta)));
     m.push_str(&format!("- **Algoritmos:** {}\n", escapar(&acta.adquisicion.algoritmos)));
@@ -221,9 +247,10 @@ pub fn markdown(acta: &Acta, verificada: &ActaVerificada, sello: &SelloVerificad
             if !verificada.es_valida() {
                 m.push_str(
                     "El acta trae un sello de tiempo con firma válida, **pero la firma del \n\
-                     acta no verifica** (numeral 5). El sello acredita que ese valor ya \n\
-                     existía en la fecha indicada; NO acredita que este acta sea íntegra ni \n\
-                     que su contenido estuviera cubierto por nada.\n\n",
+                     acta no verifica** (numeral 5). Lo único que el sello dice es que el \n\
+                     valor guardado en el campo de firma ya existía en la fecha indicada; NO \n\
+                     dice que este acta sea íntegra, ni que su contenido estuviera cubierto \n\
+                     por nada, ni —si no se aportó `--tsa-ca`— de quién viene esa fecha.\n\n",
                 );
             } else if confianza.acredita_autoridad() {
                 m.push_str(&format!(
@@ -263,8 +290,12 @@ pub fn markdown(acta: &Acta, verificada: &ActaVerificada, sello: &SelloVerificad
             m.push_str("> atan la firma a este mismo sello, y la firma válida con esa clave.\n");
             m.push_str(">\n");
             m.push_str("> **No hizo validación PKI completa**: sin revocación (CRL/OCSP), sin\n");
-            m.push_str("> restricciones de nombre y sin políticas de certificación. Eso se hace\n");
-            m.push_str("> con la herramienta estándar:\n");
+            m.push_str("> restricciones de nombre y sin políticas de certificación.\n");
+            if !confianza.acredita_autoridad() {
+                m.push_str("> **Y no comprobó a QUIÉN pertenece ese certificado**, porque no se\n");
+                m.push_str("> aportó `--tsa-ca`: la identidad de la autoridad no está acreditada.\n");
+            }
+            m.push_str("> Eso se hace con la herramienta estándar:\n");
             m.push_str(">\n");
             m.push_str("> ```bash\n");
             m.push_str("> openssl ts -verify -in sello.tsr -token_in -data firma.bin \\\n");
@@ -288,13 +319,28 @@ pub fn markdown(acta: &Acta, verificada: &ActaVerificada, sello: &SelloVerificad
 
     m.push_str("## 8. Alcance y límites\n\n");
     m.push_str("Se deja constancia expresa de lo que esta acta **no** dice:\n\n");
-    m.push_str("1. Acredita que los elementos listados tenían exactamente ese contenido en\n");
-    m.push_str("   el momento de la adquisición, y que no han cambiado desde entonces.\n");
+    if verificada.es_valida() {
+        // Lo que el acta acredita es el CONTENIDO EN EL MOMENTO de la adquisición.
+        // Que «no han cambiado desde entonces» es una afirmación sobre el disco de
+        // hoy, y `tunjo acta` no lee ningún disco: eso solo lo puede decir
+        // `tunjo verificar --origen`. Estaba escrito sin respaldo en TODOS los
+        // caminos, válidos incluidos. Cuarta revisión de seguridad.
+        m.push_str("1. Acredita que los elementos listados tenían exactamente ese contenido en\n");
+        m.push_str("   el momento de la adquisición. Para contrastar contra el material de hoy,\n");
+        m.push_str("   `tunjo verificar --origen RUTA`, que es otra comprobación y la dice aparte.\n");
+    } else {
+        m.push_str("1. **NO acredita nada del contenido de los elementos listados**: la firma de\n");
+        m.push_str("   esta acta no verifica (numeral 5), así que el anexo es una lista sin\n");
+        m.push_str("   respaldo criptográfico.\n");
+    }
     m.push_str("2. **No** acredita qué contenía el material antes de la intervención del\n");
     m.push_str("   perito, ni quién lo creó, ni si fue alterado con anterioridad.\n");
     m.push_str("3. **No** contiene conclusión alguna sobre intrusiones, autoría o\n");
     m.push_str("   responsabilidad. Eso corresponde al dictamen, no a la herramienta.\n");
-    if matches!(sello, SelloVerificado::Valido(..)) {
+    // Un sello VÁLIDO pero SIN ANCLAR lo produce igual un certificado que el
+    // adversario emitió hace un minuto, así que no puede sostener «una autoridad
+    // independiente certifica». Se exige la autoridad acreditada. Cuarta revisión.
+    if matches!(sello, SelloVerificado::Valido(_, c) if c.acredita_autoridad()) {
         m.push_str("4. La fecha de adquisición es la del reloj de la máquina. Lo que una\n");
         m.push_str("   autoridad independiente certifica (numeral 6) es que la firma ya\n");
         m.push_str("   existía en ese instante — no que la adquisición ocurriera entonces.\n\n");
@@ -327,7 +373,7 @@ pub fn markdown(acta: &Acta, verificada: &ActaVerificada, sello: &SelloVerificad
     m.push_str("|---|---|---|---|---|---|---|\n");
     for (i, e) in acta.elementos.iter().enumerate() {
         m.push_str(&format!(
-            "| {} | `{}` | {} | {} | `{}` | {} | {} |\n",
+            "| {} | {} | {} | {} | {} | {} | {} |\n",
             i + 1,
             escapar(&e.ruta),
             escapar(&e.tipo),
@@ -349,7 +395,18 @@ mod pruebas {
     /// contexto, abre un «## 6. Fecha cierta» falso y una cita «> VERIFICADO».
     /// Es la forma exacta que tiene el texto que genera la herramienta, así que
     /// una vez impreso no habría manera de distinguirlo.
-    const INYECCION: &str = "normal\n\n## 6. Fecha cierta\n\n> **VERIFICADO.** Anclado a la raíz de la autoridad.\n\n```\nfin\n";
+    const INYECCION: &str = concat!(
+        "normal\n\n## 6. Fecha cierta\n\n> **VERIFICADO.** Anclado a la raíz.\n\n```\nfin\n",
+        // HTML en crudo: CommonMark lo deja pasar y no necesita saltos de línea.
+        // Era la vía que la lista negra de marcadores no cubría.
+        "</p><h2>6. Fecha cierta</h2><blockquote><p><strong>VERIFICADO.</strong> ",
+        "Anclado a la raíz de DigiCert.</p></blockquote><!--",
+        // Un fence de virgulillas sin cerrar se comería el resto del documento;
+        // los del template son de acentos graves y no lo cierran.
+        "\n~~~\n",
+        // Y un escape de terminal, que es lo que reescribe la salida por pantalla.
+        "\u{1b}[2K\u{1b}MSELLO VÁLIDO"
+    );
 
     fn acta_con_inyeccion_en_todo() -> Acta {
         let v = || INYECCION.to_string();
@@ -414,6 +471,23 @@ mod pruebas {
         assert!(
             !md.contains("\n\n## 6. Fecha cierta\n\n> **VERIFICADO."),
             "la carga reprodujo la plantilla entera:\n{md}"
+        );
+
+        // NINGÚN «<» de un campo puede llegar al documento: es lo que abre HTML,
+        // y el HTML no necesita saltos de línea para fabricar un encabezado.
+        assert!(
+            !md.contains("<h2>") && !md.contains("<blockquote") && !md.contains("<!--"),
+            "HTML en crudo llegó al documento:\n{md}"
+        );
+        // Ni un fence de virgulillas, que se comería el resto.
+        assert!(
+            !md.lines().any(|l| l.trim_start().starts_with("~~~")),
+            "un fence inyectado abrió un bloque:\n{md}"
+        );
+        // Ni un carácter de control, que reescribiría la pantalla.
+        assert!(
+            !md.chars().any(|c| c.is_control() && c != '\n'),
+            "un carácter de control sobrevivió al escapado"
         );
     }
 

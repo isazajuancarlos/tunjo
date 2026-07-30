@@ -316,7 +316,7 @@ fn orden_verificar(
             println!("  raíz:       {}", acta.raiz_merkle);
         }
         Err(e) => {
-            println!("SELLO INVÁLIDO: {e}");
+            println!("SELLO INVÁLIDO: {}", informe::plano(&e.to_string()));
             return Ok(false);
         }
     }
@@ -349,7 +349,7 @@ fn orden_verificar(
              \x20               así que prueba orden relativo, no fecha oponible"
         ),
         Err(e) => {
-            println!("SELLO DE TIEMPO INVÁLIDO: {e}");
+            println!("SELLO DE TIEMPO INVÁLIDO: {}", informe::plano(&e.to_string()));
             return Ok(false);
         }
     }
@@ -540,8 +540,27 @@ fn orden_custodia(accion: Custodia) -> Result<bool> {
                         "✔ Cadena de custodia ÍNTEGRA: {} eslabones, firmas triple válidas, sin saltos ni reordenamientos.",
                         cadena.eslabones.len()
                     );
-                    if acta.is_some() {
-                        println!("  Y corresponde al acta, firmada por su mismo perito.");
+                    if let Some(a) = &acta_cargada {
+                        // Antes decía «firmada por su mismo perito» sin haber
+                        // verificado NADA del acta: `custodia::verificar` solo
+                        // compara la clave como CADENA y el hash canónico. Un acta
+                        // con `firma: null` daba exit 0 aquí y exit 1 en
+                        // `tunjo verificar`. Cuarta revisión de seguridad.
+                        match a.verificar_sello() {
+                            Ok(()) => println!(
+                                "  Y corresponde al acta, cuya firma SÍ verifica con la misma clave."
+                            ),
+                            Err(e) => {
+                                println!(
+                                    "  ✗ Corresponde a esa acta, pero LA FIRMA DEL ACTA NO VERIFICA: {}",
+                                    informe::plano(&e.to_string())
+                                );
+                                println!(
+                                    "    La cadena está íntegra sobre un acta que no acredita nada."
+                                );
+                                return Ok(false);
+                            }
+                        }
                     } else {
                         println!("  (Sin --acta no se comprobó a qué acta pertenece ni quién la firmó.)");
                     }
