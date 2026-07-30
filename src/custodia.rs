@@ -69,6 +69,23 @@ pub struct Eslabon {
     pub firma: String,
 }
 
+/// Un sello RFC 3161 sobre el ÚLTIMO eslabón. Una cadena de hashes prueba un
+/// PREFIJO íntegro: quien tenga la clave del perito puede entregar solo los
+/// primeros N eventos y verifican ÍNTEGROS. Anclar el hash del último eslabón a
+/// una autoridad de tiempo convierte esa truncación al final en DETECTABLE —un
+/// sello sobre el eslabón 7 desmiente una cadena entregada con 5— y añade fecha
+/// cierta a toda la cadena (el último hash encadena a todos los anteriores).
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
+pub struct SelloCadena {
+    /// Secuencia del eslabón que era el último cuando se selló.
+    pub secuencia: u64,
+    /// Hash (hex) de ese eslabón: exactamente lo que la autoridad certificó.
+    pub hash_eslabon: String,
+    /// Token RFC 3161 (DER) en base64, con el certificado de la autoridad dentro
+    /// para poder verificarlo sin salir a la red dentro de veinte años.
+    pub token_der_b64: String,
+}
+
 /// La cadena entera, anclada a un acta.
 #[derive(Serialize, Deserialize, Clone, Debug)]
 pub struct Cadena {
@@ -80,6 +97,11 @@ pub struct Cadena {
     /// falta pedir nada a quien emitió.
     pub clave_publica: String,
     pub eslabones: Vec<Eslabon>,
+    /// Sello de tiempo del último eslabón, si se pidió. `#[serde(default)]` para
+    /// que las cadenas escritas antes de esta versión (sin el campo) sigan
+    /// leyéndose como «sin sello», no como error de formato.
+    #[serde(default)]
+    pub sello_final: Option<SelloCadena>,
 }
 
 /// La referencia al acta contra la que se contrasta una cadena: sus bytes
@@ -109,6 +131,26 @@ pub enum Veredicto {
     /// otra secuencia. Sin génesis no atestigua ninguna custodia —falte el
     /// principio o falte entera—, así que no puede declararse íntegra.
     SinGenesis,
+}
+
+/// Estado del sello de tiempo de una cadena, tras contrastarlo con sus eslabones.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum EstadoSello {
+    /// No hay sello: la cadena prueba orden relativo, no fecha cierta ni
+    /// completitud. Una truncación al final sería indetectable.
+    Ausente,
+    /// El sello es válido y certifica el eslabón que HOY es el último: hay fecha
+    /// cierta y la completitud está probada hasta aquí.
+    Vigente { fecha_utc: String, secuencia: u64 },
+    /// El sello es válido pero certifica un eslabón ANTERIOR al último: se
+    /// añadieron eventos después de sellar, aún sin sellar. Es legítimo.
+    CubrePrefijo { fecha_utc: String, sellado: u64, ultimo: u64 },
+    /// El sello certifica un eslabón MÁS ALLÁ del último actual: la cadena se
+    /// TRUNCÓ tras sellarse. Es justo lo que el sello existe para delatar.
+    Truncada { fecha_utc: String, sellado: u64, ultimo: u64 },
+    /// El token no valida contra el hash que dice sellar, o el eslabón sellado no
+    /// coincide con el de esa posición en la cadena: sello corrupto o cambiado.
+    Invalido { motivo: String },
 }
 
 fn a_hex(b: &[u8]) -> String {
@@ -177,6 +219,7 @@ pub fn iniciar(acta_bytes_canonicos: &[u8], adquisicion: Evento, sk: &TripleSign
             hash: a_hex(&sello.hash),
             firma: sello.firma,
         }],
+        sello_final: None,
     }
 }
 
@@ -271,6 +314,92 @@ pub fn verificar(cadena: &Cadena, acta: Option<Ancla>) -> Result<Veredicto> {
         }
     }
     Ok(Veredicto::Intacta)
+}
+
+/// Sella el ÚLTIMO eslabón de la cadena contra una autoridad RFC 3161 y guarda el
+/// token dentro de la cadena. Es una llamada de RED. Reemplaza cualquier sello
+/// anterior a propósito: el sello vigente debe cubrir el eslabón que hoy es el
+/// último, o dejaría de ser el ancla de completitud que promete.
+pub fn sellar_final(cadena: &mut Cadena, url: &str) -> Result<crate::sello_tiempo::DatosSello> {
+    let ultimo = cadena
+        .eslabones
+        .last()
+        .ok_or_else(|| anyhow!("la cadena no tiene eslabones que sellar"))?;
+    let hash = de_hex32(&ultimo.hash)
+        .ok_or_else(|| anyhow!("el hash del último eslabón está corrupto"))?;
+
+    let mut nonce = [0u8; 16];
+    getrandom::fill(&mut nonce)
+        .map_err(|e| anyhow!("no hay aleatoriedad del sistema para el nonce: {e}"))?;
+
+    let token = crate::sello_tiempo::solicitar(&hash, url, &nonce)?;
+    // Se verifica el token recién recibido contra el mismo hash: si la autoridad
+    // devolvió algo que no sella lo que se pidió, se falla aquí y no se guarda.
+    let datos = crate::sello_tiempo::verificar(&token, &hash)?;
+
+    cadena.sello_final = Some(SelloCadena {
+        secuencia: ultimo.secuencia,
+        hash_eslabon: ultimo.hash.clone(),
+        token_der_b64: STANDARD.encode(&token),
+    });
+    Ok(datos)
+}
+
+/// Sitúa un sello ya verificado (su `fecha_utc` viene del token válido) dentro de
+/// la cadena actual. Es la parte SIN criptografía: decide, comparando secuencias y
+/// hashes, si el sello cubre el último eslabón, un prefijo, o si la cadena fue
+/// truncada tras sellarse. Se prueba sola, sin red.
+fn situar(sello: &SelloCadena, eslabones: &[Eslabon], fecha_utc: String) -> EstadoSello {
+    let Some(ultimo) = eslabones.last() else {
+        return EstadoSello::Invalido { motivo: "sello sobre una cadena sin eslabones".into() };
+    };
+    // El sello certifica un eslabón que ya no existe: le quitaron eventos del final.
+    if sello.secuencia > ultimo.secuencia {
+        return EstadoSello::Truncada {
+            fecha_utc,
+            sellado: sello.secuencia,
+            ultimo: ultimo.secuencia,
+        };
+    }
+    // El eslabón sellado tiene que existir en la cadena y con EL MISMO hash.
+    match eslabones.iter().find(|e| e.secuencia == sello.secuencia) {
+        Some(e) if e.hash == sello.hash_eslabon => {
+            if sello.secuencia == ultimo.secuencia {
+                EstadoSello::Vigente { fecha_utc, secuencia: sello.secuencia }
+            } else {
+                EstadoSello::CubrePrefijo {
+                    fecha_utc,
+                    sellado: sello.secuencia,
+                    ultimo: ultimo.secuencia,
+                }
+            }
+        }
+        _ => EstadoSello::Invalido {
+            motivo: format!("el eslabón {} que dice sellar no coincide con la cadena", sello.secuencia),
+        },
+    }
+}
+
+/// Verifica el sello de tiempo de una cadena y lo sitúa respecto de sus eslabones.
+/// NO comprueba la integridad de la cadena: eso es [`verificar`]; llámalas ambas.
+/// Falla ruidosamente solo cuando no hay nada que juzgar (sin sello -> `Ausente`);
+/// un token inválido devuelve `Invalido`, no un `Err`, para que el llamante lo
+/// reporte junto al resto.
+pub fn estado_sello(cadena: &Cadena) -> EstadoSello {
+    let Some(sello) = &cadena.sello_final else {
+        return EstadoSello::Ausente;
+    };
+    let Some(hash32) = de_hex32(&sello.hash_eslabon) else {
+        return EstadoSello::Invalido { motivo: "el hash del sello no es hex de 32 bytes".into() };
+    };
+    let token = match STANDARD.decode(&sello.token_der_b64) {
+        Ok(t) => t,
+        Err(_) => return EstadoSello::Invalido { motivo: "el token del sello no es base64".into() },
+    };
+    match crate::sello_tiempo::verificar(&token, &hash32) {
+        Ok(datos) => situar(sello, &cadena.eslabones, datos.fecha_utc),
+        Err(e) => EstadoSello::Invalido { motivo: format!("el token no valida: {e}") },
+    }
 }
 
 /// Lee una cadena desde JSON, rechazando un formato desconocido.
@@ -413,6 +542,7 @@ mod pruebas {
             acta_sha256: sha256_hex(acta),
             clave_publica: STANDARD.encode(sk.verifying_key().to_bytes()),
             eslabones: vec![],
+            sello_final: None,
         };
         let a = Ancla { bytes_canonicos: acta, clave_publica: &vacia.clave_publica };
         assert_eq!(verificar(&vacia, Some(a)).unwrap(), Veredicto::SinGenesis);
@@ -446,6 +576,7 @@ mod pruebas {
             acta_sha256: sha256_hex(b"un acta cualquiera"),
             clave_publica: STANDARD.encode(sk.verifying_key().to_bytes()),
             eslabones,
+            sello_final: None,
         };
         assert_eq!(verificar(&c, None).unwrap(), Veredicto::SinGenesis);
     }
@@ -460,6 +591,7 @@ mod pruebas {
             acta_sha256: sha256_hex(b"acta"),
             clave_publica: STANDARD.encode(sk.verifying_key().to_bytes()),
             eslabones: vec![],
+            sello_final: None,
         };
         assert_eq!(verificar(&vacia, None).unwrap(), Veredicto::SinGenesis);
     }
@@ -471,6 +603,108 @@ mod pruebas {
         let raro = format!("é{}", "a".repeat(62)); // 2 + 62 = 64 bytes, no ASCII
         assert_eq!(raro.len(), 64);
         assert!(de_hex32(&raro).is_none());
+    }
+
+    // --- Sello de tiempo de la cadena (#196) ---------------------------------
+    //
+    // `situar` es la parte SIN red: dado un sello ya verificado (fecha del token
+    // válido) y los eslabones, decide si cubre el tip, un prefijo, o si hubo
+    // truncación. Es donde vive el valor de #196, así que se prueba directa.
+
+    fn sello_de(eslabon: &Eslabon) -> SelloCadena {
+        SelloCadena {
+            secuencia: eslabon.secuencia,
+            hash_eslabon: eslabon.hash.clone(),
+            token_der_b64: "no-usado-por-situar".into(),
+        }
+    }
+
+    #[test]
+    fn el_sello_del_ultimo_eslabon_esta_vigente() {
+        let (c, _) = cadena_de_tres(b"acta");
+        let sello = sello_de(c.eslabones.last().unwrap());
+        assert_eq!(
+            situar(&sello, &c.eslabones, "2026-07-29T15:00:00Z".into()),
+            EstadoSello::Vigente { fecha_utc: "2026-07-29T15:00:00Z".into(), secuencia: 2 }
+        );
+    }
+
+    #[test]
+    fn un_sello_sobre_un_prefijo_es_legitimo() {
+        // Se selló el eslabón 0 y luego se añadieron el 1 y el 2: cubre prefijo.
+        let (c, _) = cadena_de_tres(b"acta");
+        let sello = sello_de(&c.eslabones[0]);
+        assert_eq!(
+            situar(&sello, &c.eslabones, "T".into()),
+            EstadoSello::CubrePrefijo { fecha_utc: "T".into(), sellado: 0, ultimo: 2 }
+        );
+    }
+
+    #[test]
+    fn un_sello_sobre_un_eslabon_ausente_delata_la_truncacion() {
+        // El corazón de #196: se selló el eslabón 2, luego alguien entregó la
+        // cadena recortada a solo el génesis. El sello lo desmiente.
+        let (mut c, _) = cadena_de_tres(b"acta");
+        let sello = sello_de(&c.eslabones[2]);
+        c.eslabones.truncate(1); // queda solo el eslabón 0
+        assert_eq!(
+            situar(&sello, &c.eslabones, "T".into()),
+            EstadoSello::Truncada { fecha_utc: "T".into(), sellado: 2, ultimo: 0 }
+        );
+    }
+
+    #[test]
+    fn un_sello_cuyo_hash_no_cuadra_es_invalido() {
+        // Mismo número de eslabón, hash cambiado: el sello no corresponde a ese
+        // eslabón de la cadena actual.
+        let (c, _) = cadena_de_tres(b"acta");
+        let mut sello = sello_de(c.eslabones.last().unwrap());
+        sello.hash_eslabon = sha256_hex(b"otro eslabon");
+        assert!(matches!(
+            situar(&sello, &c.eslabones, "T".into()),
+            EstadoSello::Invalido { .. }
+        ));
+    }
+
+    #[test]
+    fn sin_sello_el_estado_es_ausente() {
+        let (c, _) = cadena_de_tres(b"acta");
+        assert_eq!(estado_sello(&c), EstadoSello::Ausente);
+    }
+
+    #[test]
+    fn un_token_de_sello_ilegible_es_invalido_no_panico() {
+        // `estado_sello` con un token que no es base64/DER válido reporta
+        // Invalido, sin salir a la red ni hacer panic.
+        let (mut c, _) = cadena_de_tres(b"acta");
+        c.sello_final = Some(SelloCadena {
+            secuencia: 2,
+            hash_eslabon: c.eslabones[2].hash.clone(),
+            token_der_b64: "esto no es base64 válido !!!".into(),
+        });
+        assert!(matches!(estado_sello(&c), EstadoSello::Invalido { .. }));
+    }
+
+    #[test]
+    fn una_cadena_con_sello_ronda_por_json_sin_perder_el_campo() {
+        // El sello sobrevive a serializar/deserializar, y una cadena SIN el campo
+        // (formato viejo) se lee como Ausente, no como error.
+        let (mut c, _) = cadena_de_tres(b"acta");
+        c.sello_final = Some(SelloCadena {
+            secuencia: 2,
+            hash_eslabon: c.eslabones[2].hash.clone(),
+            token_der_b64: "QUJD".into(),
+        });
+        let json = serde_json::to_string(&c).unwrap();
+        let leida = desde_json(&json).unwrap();
+        assert_eq!(leida.sello_final, c.sello_final);
+
+        // Y una cadena sin el campo se acepta como sin sello.
+        let (vieja, _) = cadena_de_tres(b"acta");
+        let mut v: Value = serde_json::from_str(&serde_json::to_string(&vieja).unwrap()).unwrap();
+        v.as_object_mut().unwrap().remove("sello_final");
+        let releida = desde_json(&v.to_string()).unwrap();
+        assert_eq!(estado_sello(&releida), EstadoSello::Ausente);
     }
 
     #[test]

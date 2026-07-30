@@ -140,6 +140,15 @@ enum Custodia {
         #[arg(long)]
         descripcion: String,
     },
+    /// Sella el último eslabón contra una autoridad de tiempo RFC 3161, para que
+    /// truncar la cadena por el final sea detectable y toda ella tenga fecha cierta.
+    Sello {
+        #[arg(long, default_value = "cadena.json")]
+        cadena: PathBuf,
+        /// URL de la autoridad de sellado (RFC 3161), p. ej. http://timestamp.digicert.com
+        #[arg(long)]
+        sello: String,
+    },
     /// Verifica la cadena (eslabones, firmas triple, secuencia) y, con --acta, el ancla.
     Verificar {
         #[arg(long, default_value = "cadena.json")]
@@ -415,6 +424,23 @@ fn orden_custodia(accion: Custodia) -> Result<bool> {
             );
             Ok(true)
         }
+        Custodia::Sello { cadena: ruta, sello } => {
+            let texto = std::fs::read_to_string(&ruta)
+                .with_context(|| format!("leyendo la cadena {}", ruta.display()))?;
+            let mut cadena = custodia::desde_json(&texto)?;
+            let datos = custodia::sellar_final(&mut cadena, &sello)?;
+            std::fs::write(&ruta, serde_json::to_vec_pretty(&cadena)?)?;
+            let n = cadena.eslabones.len();
+            println!(
+                "Sello de tiempo puesto sobre el eslabón {} (el último de {n}).\n  \
+                 fecha cierta: {} — {}\n  \
+                 Desde ahora, entregar la cadena recortada por el final se detecta al verificar.",
+                n - 1,
+                datos.fecha_utc,
+                sello
+            );
+            Ok(true)
+        }
         Custodia::Verificar { cadena: ruta, acta } => {
             let texto = std::fs::read_to_string(&ruta)
                 .with_context(|| format!("leyendo la cadena {}", ruta.display()))?;
@@ -448,7 +474,43 @@ fn orden_custodia(accion: Custodia) -> Result<bool> {
                         "  Huella de la clave de la cadena (cotéjala con la del perito): {}",
                         huella_clave(&cadena.clave_publica)
                     );
-                    Ok(true)
+                    // La integridad prueba un PREFIJO; el sello de tiempo dice si
+                    // ese prefijo es TODO lo que hubo. Sin sello no se puede saber.
+                    match custodia::estado_sello(&cadena) {
+                        custodia::EstadoSello::Ausente => {
+                            println!(
+                                "  Sin sello de tiempo: prueba el orden relativo, no la fecha ni que\n  \
+                                 no falten eventos AL FINAL. Séllala con `tunjo custodia sello`."
+                            );
+                            Ok(true)
+                        }
+                        custodia::EstadoSello::Vigente { fecha_utc, secuencia } => {
+                            println!(
+                                "  ✔ Sellada en el tiempo (RFC 3161) sobre el último eslabón ({secuencia}):\n  \
+                                 fecha cierta {fecha_utc}. La cadena está completa hasta aquí."
+                            );
+                            Ok(true)
+                        }
+                        custodia::EstadoSello::CubrePrefijo { fecha_utc, sellado, ultimo } => {
+                            println!(
+                                "  ✔ Sellada en el tiempo (RFC 3161) hasta el eslabón {sellado} ({fecha_utc});\n  \
+                                 los eslabones {}..{ultimo} se añadieron después y aún no están sellados.",
+                                sellado + 1
+                            );
+                            Ok(true)
+                        }
+                        custodia::EstadoSello::Truncada { fecha_utc, sellado, ultimo } => {
+                            println!(
+                                "  ✗ TRUNCADA: hay un sello de tiempo ({fecha_utc}) sobre el eslabón {sellado},\n  \
+                                 pero la cadena entregada llega solo al {ultimo}. Le quitaron eventos del final."
+                            );
+                            Ok(false)
+                        }
+                        custodia::EstadoSello::Invalido { motivo } => {
+                            println!("  ✗ El sello de tiempo NO es válido: {motivo}.");
+                            Ok(false)
+                        }
+                    }
                 }
                 custodia::Veredicto::Rota { secuencia, motivo } => {
                     println!("✗ Cadena ROTA en el eslabón {secuencia}: {motivo}.");

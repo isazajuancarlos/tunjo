@@ -124,11 +124,26 @@ custodia no puede ser el eslabón criptográficamente débil de la prueba.
 y el último eslabón presente. No puede probar que ese último eslabón sea el
 último que existió — quien tenga la clave puede quedarse con los primeros N
 eventos y entregar solo esos, y la cadena verifica ÍNTEGRA. Ninguna cadena de
-hashes puede cerrar ese hueco por sí sola, y `tunjo` todavía no sella la cadena
-como sella el acta: lo que lo cierra es **sacar el último hash del alcance de
-quien custodia** —dejarlo en el expediente, comunicarlo a la contraparte— en
-cada entrega. Que la cadena esté íntegra dice que no está *manipulada*, no que
-esté *completa*.
+hashes puede cerrar ese hueco por sí sola.
+
+Lo cierra un **sello de tiempo sobre el último eslabón**:
+
+```bash
+tunjo custodia sello --cadena cadena.json --sello http://timestamp.digicert.com
+```
+
+ancla el hash del último eslabón a una autoridad RFC 3161, y `custodia verificar`
+lo comprueba. Un sello sobre el eslabón 7 desmiente una cadena entregada con 5:
+la verificación reporta **TRUNCADA** y sale con error. Con más eventos añadidos
+tras el sello, informa hasta qué eslabón llega la fecha cierta (los posteriores
+quedan sin sellar hasta que se vuelva a sellar).
+
+El sello **debe viajar con la cadena o quedar publicado**: quien la recorta puede
+además quitar el sello, y entonces la verificación dirá «sin sello». Cierra el
+hueco frente a quien conserva el sello —el expediente, la contraparte—, no frente
+a quien nunca supo que existió; por eso se comunica o se archiva en cada entrega.
+Que la cadena esté íntegra dice que no está *manipulada*; el sello es lo que
+además dice que está *completa* y desde cuándo.
 
 ## Fecha cierta: `--sello`
 
