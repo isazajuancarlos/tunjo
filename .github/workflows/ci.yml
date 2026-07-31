@@ -5,11 +5,34 @@
 # confunde con un interbloqueo (lección del commit 0b24c25).
 name: CI
 
+# CADA COMMIT SE PRUEBA UNA VEZ, no dos.
+#
+# Antes esto decía `push: branches: ["**"]` junto a `pull_request`, y una rama con
+# PR abierto disparaba LOS DOS eventos sobre el mismo commit: los checks corrían
+# por duplicado. En un repositorio PRIVADO los minutos de Actions se facturan, y
+# el 2026-07-31 el cupo de la cuenta se agotó — con esto se deja de gastarlo al
+# doble.
+#
+# `push` se queda SOLO en `main`, que es lo que verifica el commit de fusión: el
+# resultado de un squash no lo ha probado nadie hasta que existe. Las ramas las
+# cubre `pull_request`, que vuelve a correr en cada empuje mientras el PR esté
+# abierto (`synchronize`).
+#
+# LO QUE DEJA FUERA: una rama empujada SIN PR ya no tiene CI. Es deliberado — el
+# flujo es rama -> PR -> merge, y la protección de `main` exige el PR.
 on:
   push:
-    branches: ["**"]
+    branches: [main]
   pull_request:
     branches: [main]
+
+# Un empuje nuevo cancela la corrida anterior de la misma referencia: corregir un
+# PR tres veces seguidas dejaba tres corridas compitiendo cuando solo importa la
+# última. En `main` NO se cancela — cada commit de esa rama es un estado publicado
+# y su resultado tiene que quedar registrado.
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
 
 permissions:
   # Menor privilegio (supply-chain #203): este CI solo prueba, con checkout de
