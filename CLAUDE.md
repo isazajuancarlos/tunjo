@@ -23,25 +23,37 @@ una app de peritaje, no una librería—.
 | Dependencia | Cómo entra | Por qué así |
 |---|---|---|
 | `quipu = "0.10"` (feature `slh`) | **crates.io**, nunca por `path` | un repositorio que solo compila con un checkout hermano no lo puede construir quien lo clona, y **el verificador tiene que ser ejecutable por cualquiera** |
-| `guaca` (`auditoria`) | **git, fijado por `rev`** (= tag `v0.3.0`) | un tag es mutable: mover `v0.3.0` a un commit malicioso nos lo traería al construir (ataque Atomic Arch a AUR). El `Cargo.lock` ya lo fijaba; el `rev` lo hace explícito |
+| `guaca` (`auditoria`) | **git, fijado por `rev`** `9d26ccec` | un tag es mutable: mover `v0.3.0` a un commit malicioso nos lo traería al construir (ataque Atomic Arch a AUR). El `Cargo.lock` ya lo fijaba; el `rev` lo hace explícito |
+
+Que ese `rev` sea **hoy** la `v0.3.0` es un dato que caduca sin avisar —es
+justamente lo que el tag puede hacer—, así que no se cree, se comprueba (así el
+2026-08-04, y coincidía):
+
+```bash
+git ls-remote https://github.com/isazajuancarlos/guaca 'refs/tags/v0.3.0^{}'
+# el `^{}` es el punto: sin él sale el objeto-tag, no el commit
+```
 
 **Un cambio en Quipu o en guaca NO llega solo.** El árbol de decod va por
 `0.11.0` y aquí se pide `^0.10`, que **no casa con 0.11**: publicar una versión
 nueva de Quipu no actualiza a tunjo, y subir el requisito es una decisión que se
 toma leyendo qué cambió (`/mnt/data/decod/CLAUDE.md`), no un `cargo update`. Lo
-mismo con guaca: hasta que no se mueva el `rev`, aquí no entra nada.
+mismo con guaca —cuyo `CLAUDE.md` propio está en `/mnt/data/guaca`—: hasta que no
+se mueva el `rev`, aquí no entra nada.
 
 ## Comandos
 
 ```bash
-# Los DOS del CI, exactos (.github/workflows/ci.yml). Verde local = estos dos.
+# Los TRES del CI, exactos (.github/workflows/ci.yml). Verde local = estos tres.
+# Van en DOS trabajos —`rust` y `cadena-suministro`—, así que cargo-deny puede
+# ponerse rojo con las pruebas verdes: no es un extra, es un check obligatorio.
 cargo clippy --all-targets --release -- -D warnings
 cargo test --release
+cargo deny check                             # cargo install cargo-deny --locked
 
 cargo test --release --no-fail-fast          # para VER todos los fallos: sin esto
                                              # el primer binario rojo aborta el resto
 cargo test --release --test integracion sellar_y_verificar_un_directorio  # una sola
-cargo deny check                             # cadena de suministro (cargo install cargo-deny --locked)
 ```
 
 **`--release` no es una preferencia, es la única forma viable.** SLH-DSA y Argon2id
@@ -90,6 +102,24 @@ protocolo (pedir, leer el `TSTInfo`, comprobar QUÉ sella); el segundo es la fir
 CMS (QUIÉN lo firmó, si el certificado sirve para sellar, si estaba vigente, y si
 encadena a un ancla aportada con `--tsa-ca`).
 
+Fuera de esa cadena quedan dos módulos pequeños que se usan desde todos:
+`clave.rs` (la clave del perito, cifrada con contraseña sobre el contenedor de
+Quipu) y `texto.rs` (`plano`, el saneador de pantalla del invariante 2).
+`informe.rs` es el más grande —1.360 líneas— y se navega por sus submódulos:
+`papel` (privado, el único que tiene el `String`), `dicho` (TODAS las constantes
+de prosa) y los tipos `Dato`/`EnValla`/`Fijo`/`Segun<C>`/`PorFecha`.
+
+## La superficie del CLI
+
+`clave` · `sellar` · `verificar` · `acta` · `custodia {iniciar, evento, sello,
+verificar}`. Los tres del invariante 3 son `verificar`, `acta` y
+`custodia verificar`.
+
+Para ejercer el binario **sin terminal** —lotes, pruebas, guiones— la contraseña
+de la clave se puede dar en `TUNJO_CONTRASENA` (`main.rs`, `VAR_CONTRASENA`). Es
+opt-in y tiene su coste declarado: queda en el entorno del proceso. Sin ella,
+`rpassword` la pide por tty y un guion se queda colgado.
+
 ## Invariantes que no se pueden romper
 
 Nacieron de siete pasadas de `security-review` sobre la rama del sello (2, 2, 3, 5,
@@ -108,10 +138,19 @@ hicieron **inexpresables**. Al tocar esta capa, se respetan o se vuelve al bucle
    despacha con `match` exhaustivo: **un estado nuevo sin su texto no compila.**
 2. **Nada del JSON llega a la salida sin neutralizar.** Para el documento, `Dato`
    (escapa TODA la puntuación ASCII, no una lista negra) y `EnValla` (solo valores
-   cuya forma se validó). Para la pantalla, `texto::plano` —y se aplica **donde el
-   valor nace**: al construir `Confianza`, `DatosSello` y `EstadoSello::Invalido`,
-   no en cada `println!`, porque acordarse en cada sitio es exactamente lo que
-   falló seis rondas seguidas.
+   cuya forma se validó). Para la pantalla, `texto::plano` (reexportado como
+   `informe::plano`), por **dos** vías que hay que distinguir al añadir un campo:
+   - **Saneado al nacer** lo que se construye a partir de texto ajeno: la
+     `autoridad` de `Confianza` (`firma_cms.rs`) y el `motivo` de
+     `EstadoSello::Invalido` (`custodia.rs`). Ahí ya no hace falta acordarse.
+   - **Seguro por su forma** lo de `DatosSello`, que NO pasa por `plano`:
+     `politica` es un OID (dígitos y puntos), `serie` es hex y `fecha_utc` sale de
+     `DateTime`. Por eso `main.rs` los imprime en crudo. **Un campo de texto libre
+     nuevo en `DatosSello` rompe el invariante en silencio** — o se sanea al
+     construirlo, o no entra.
+   - Lo que sigue siendo responsabilidad de cada `println!` son los campos crudos
+     del acta (`caso.referencia`, `perito.nombre`, los `to_string()` de errores):
+     en `main.rs` van todos envueltos en `informe::plano`.
 3. **Los tres comandos que verifican no se contradicen.** `verificar`, `acta` y
    `custodia verificar` devuelven el mismo veredicto sobre el mismo archivo: si uno
    es más permisivo, es el que recomendaría quien entrega algo forjado. Lo fija
@@ -135,8 +174,11 @@ hicieron **inexpresables**. Al tocar esta capa, se respetan o se vuelve al bucle
 9. **La herramienta acredita, no concluye**, y es firma **electrónica** del Decreto
    2364 de 2012, nunca «firma digital» del art. 28 de la Ley 527. Ninguna frase de
    la salida puede prometer más que el README (`MARCO_JURIDICO.md` §4 y §6.1).
-10. **Nunca se escribe dentro del origen**, y `sellar` / `custodia iniciar` se
-    niegan a sobrescribir su salida.
+10. **Nunca se escribe dentro del origen** (`recoleccion` no abre un solo archivo
+    en escritura), y las tres órdenes que crean algo —`clave`, `sellar`,
+    `custodia iniciar`— se niegan a sobrescribir su salida. La de `clave` es la
+    más grave de las tres: pisarla deja sin verificar todas las actas firmadas
+    con la anterior.
 
 ## Pruebas
 
