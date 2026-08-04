@@ -118,7 +118,10 @@ verificar}`. Los tres del invariante 3 son `verificar`, `acta` y
 Para ejercer el binario **sin terminal** —lotes, pruebas, guiones— la contraseña
 de la clave se puede dar en `TUNJO_CONTRASENA` (`main.rs`, `VAR_CONTRASENA`). Es
 opt-in y tiene su coste declarado: queda en el entorno del proceso. Sin ella,
-`rpassword` la pide por tty y un guion se queda colgado.
+`rpassword` la pide por tty, y donde no hay terminal **falla** —no se queda
+colgado— diciendo que la variable existe. El mensaje se puso el 2026-08-04: antes
+salía el error del sistema en crudo, «No such device or address (os error 6)»,
+que no nombraba ni la contraseña ni la variable que lo resuelve.
 
 ## Invariantes que no se pueden romper
 

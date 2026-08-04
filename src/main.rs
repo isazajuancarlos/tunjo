@@ -206,6 +206,15 @@ fn leer_anclas(ruta: Option<&Path>) -> Result<Vec<x509_cert::Certificate>> {
 /// en el entorno del proceso—, así que se dice aquí y en el README.
 const VAR_CONTRASENA: &str = "TUNJO_CONTRASENA";
 
+/// Lo que hay que decir cuando no hay terminal donde preguntar.
+///
+/// Sin esto, `rpassword` propaga el error del sistema en crudo y un guion sin
+/// tty muere con «No such device or address (os error 6)», que no nombra ni la
+/// contraseña ni la variable que lo resuelve. Es el caso normal de un sellado
+/// por lotes, no un caso raro (2026-08-04).
+const SIN_TERMINAL: &str = "no hay terminal donde pedir la contraseña; \
+     para uso no interactivo (lotes, guiones, CI) pásala en TUNJO_CONTRASENA";
+
 fn pedir_contrasena(confirmar: bool) -> Result<String> {
     if let Ok(p) = std::env::var(VAR_CONTRASENA) {
         if p.trim().is_empty() {
@@ -213,12 +222,13 @@ fn pedir_contrasena(confirmar: bool) -> Result<String> {
         }
         return Ok(p);
     }
-    let p = rpassword::prompt_password("Contraseña de la clave del perito: ")?;
+    let p = rpassword::prompt_password("Contraseña de la clave del perito: ")
+        .context(SIN_TERMINAL)?;
     if p.trim().is_empty() {
         bail!("una clave de firma sin contraseña no protege nada");
     }
     if confirmar {
-        let otra = rpassword::prompt_password("Repítela: ")?;
+        let otra = rpassword::prompt_password("Repítela: ").context(SIN_TERMINAL)?;
         if p != otra {
             bail!("las contraseñas no coinciden");
         }
