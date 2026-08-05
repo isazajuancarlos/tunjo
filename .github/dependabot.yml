@@ -1,0 +1,64 @@
+# SPDX-FileCopyrightText: 2026 Juan Carlos Isaza Arenas
+# SPDX-License-Identifier: AGPL-3.0-or-later
+#
+# Actualizaciones de dependencias de tunjo.
+#
+# LO QUE ESTE ARCHIVO **NO** HACE, y hay que decirlo antes que nada: las
+# actualizaciones de VERSIÓN (esto) y las de SEGURIDAD son dos cosas distintas
+# en GitHub. Las de seguridad dependen de que las *alertas* de Dependabot estén
+# activadas en los ajustes del repositorio, que es un interruptor y no un
+# archivo. Tener este `dependabot.yml` y creer que ya llegan los avisos de
+# RUSTSEC sería justo el sistema que *parece* funcionar (directiva 20).
+#
+# Lo que sí cubre hoy los avisos es el trabajo `cadena-suministro` del CI, que
+# corre `cargo deny check` en cada PR y en cada commit de `main`. Eso ve un
+# RUSTSEC nuevo en el siguiente empujón; lo que no hace es avisar entre uno y
+# otro.
+#
+# GUACA NO ENTRA AQUÍ. Viene por git fijada por `rev` inmutable, y Dependabot no
+# actualiza dependencias de git por `rev` — a propósito por nuestra parte: mover
+# ese `rev` es una decisión que se toma leyendo qué cambió, no un automatismo.
+# Lo mismo vale para subir el requisito de `quipu`, que está en `^0.10` para que
+# una versión con cambio de comportamiento no entre sola.
+#
+# NUNCA se pone `target-branch` en una entrada: desconecta ESA entrada de las
+# actualizaciones de seguridad. El ruido se controla con `schedule`, `groups` y
+# `open-pull-requests-limit`, que es lo que se hace abajo.
+#
+# El coste de las corridas es cero: tunjo es un repositorio PÚBLICO y sus
+# minutos de Actions no se facturan.
+version: 2
+updates:
+  - package-ecosystem: cargo
+    directory: "/"
+    schedule:
+      interval: weekly
+      day: monday
+      time: "06:00"
+      timezone: America/Bogota
+    # Un PR por grupo en vez de uno por crate. Con ~200 dependencias
+    # transitivas, sin agrupar esto se convierte en la alarma que a la tercera
+    # nadie mira.
+    groups:
+      parches:
+        patterns: ["*"]
+        update-types: [patch]
+      menores:
+        patterns: ["*"]
+        update-types: [minor]
+    open-pull-requests-limit: 3
+    commit-message:
+      prefix: "chore(deps)"
+    labels: [dependencias]
+
+  # Las acciones del CI son código de terceros que corre DENTRO de nuestra
+  # tubería, con el `GITHUB_TOKEN` delante. Que estén al día es cadena de
+  # suministro, no cosmética.
+  - package-ecosystem: github-actions
+    directory: "/"
+    schedule:
+      interval: monthly
+    open-pull-requests-limit: 2
+    commit-message:
+      prefix: "ci(deps)"
+    labels: [dependencias]
