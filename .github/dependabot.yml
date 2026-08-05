@@ -74,6 +74,24 @@ updates:
     # así que su 0.3 estable es exactamente la señal que se quiere recibir. Si
     # también lo ignorásemos, el día que se pudiera mover el racimo no se
     # enteraría nadie — un vigilante que se calla el único evento que importa.
+    #
+    # LO QUE NO SABEMOS, dicho en vez de supuesto: no está claro si estos
+    # `ignore` silencian TAMBIÉN las actualizaciones de SEGURIDAD, además de las
+    # de versión. Se buscó en la documentación de GitHub el 2026-08-04 —la
+    # referencia de opciones y la de configurar actualizaciones de seguridad— y
+    # ninguna de las dos lo afirma ni lo niega.
+    #
+    # Así que NO se cuenta con Dependabot para eso, y no hace falta: quien
+    # detecta aquí un RUSTSEC es `cargo deny check`, que corre como trabajo
+    # OBLIGATORIO del CI en cada PR y en cada commit de `main`, mira el árbol
+    # entero y no sabe nada de este archivo. Un aviso sobre `rsa` 0.9 pone ese
+    # check en rojo aunque Dependabot no abra un solo PR. Dependabot es la
+    # comodidad; el `deny` es la puerta.
+    #
+    # Si algún día hiciera falta que un arreglo de seguridad que EXIGE saltar de
+    # línea llegue por PR, la salida no es quitar estos `ignore` —volverían los
+    # tres PR inmergeables— sino mover el racimo entero a mano, que es la
+    # decisión que este bloque describe.
     ignore:
       # Fijados por lo que exige `cms` 0.2.
       - dependency-name: const-oid
