@@ -1648,7 +1648,7 @@ dependencies = [
  "chrono",
  "clap",
  "cms",
- "const-oid 0.9.6",
+ "const-oid 0.10.2",
  "der 0.7.10",
  "getrandom 0.4.3",
  "guaca",

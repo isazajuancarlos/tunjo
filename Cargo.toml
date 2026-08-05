@@ -49,7 +49,7 @@ rpassword = "7"
 # se hablan entre sí.
 cms = "0.2"
 der = { version = "0.7", features = ["oid", "std"] }
-const-oid = "0.9"
+const-oid = "0.10"
 # Verificación de la firma CMS del token (#196). `x509-cert` y `spki` ya venían
 # por `cms`; se declaran explícitos porque ahora los usa código nuestro, y una
 # dependencia que se usa a la cara no se hereda en silencio.
