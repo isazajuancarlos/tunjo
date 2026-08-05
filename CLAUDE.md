@@ -94,7 +94,7 @@ da dos respuestas a quien audite cuál firmó.
 dice qué hacer cuando llegue.** En `0.x` el minor hace de major para cargo, así
 que `^0.11` no casará con la 0.12: publicar una versión nueva de Quipu **nunca**
 actualiza a tunjo por `cargo update`. Hay que venir a editar el requisito, leer
-qué cambió (`/mnt/data/decod/CLAUDE.md`) y pasar la puerta. Lo mismo con guaca
+qué cambió (`/mnt/data/quipu/CLAUDE.md`) y pasar la puerta. Lo mismo con guaca
 —cuyo `CLAUDE.md` propio está en `/mnt/data/guaca`—: hasta que no se mueva el
 `rev`, aquí no entra nada.
 
@@ -132,7 +132,7 @@ cualquiera), un `.cargo/config.toml` sin versionar:
 
 ```toml
 [patch.crates-io]
-quipu = { path = "../decod" }
+quipu = { path = "../quipu" }
 ```
 
 `guaca` va por **`rev` inmutable**, nunca por tag: mover `v0.3.0` a un commit

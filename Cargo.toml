@@ -26,7 +26,7 @@ homepage = "https://github.com/isazajuancarlos/tunjo"
 # verificador tiene que ser ejecutable por cualquiera. Para desarrollar contra
 # un Quipu local, añade en un `.cargo/config.toml` sin versionar:
 #     [patch.crates-io]
-#     quipu = { path = "../decod" }
+#     quipu = { path = "../quipu" }
 quipu = { version = "0.11", features = ["slh"] }
 # La cadena de custodia usa el encadenamiento de guaca, firmado en TRIPLE (el
 # firmante lo pone tunjo, que ya tiene SLH-DSA). guaca aporta solo la cadena.
