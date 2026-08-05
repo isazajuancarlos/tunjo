@@ -22,78 +22,68 @@ una app de peritaje, no una librería—.
 
 | Dependencia | Cómo entra | Por qué así |
 |---|---|---|
-| `quipu = "0.10"` (feature `slh`) | **crates.io**, nunca por `path` | un repositorio que solo compila con un checkout hermano no lo puede construir quien lo clona, y **el verificador tiene que ser ejecutable por cualquiera** |
-| ↳ y **se queda en 0.10** | decidido el **2026-08-05**, no pendiente | ver abajo — no es una espera, es una decisión con su condición para revisarse |
-| `guaca` (`auditoria`) | **git, fijado por `rev`** `9d26ccec` | un tag es mutable: mover `v0.3.0` a un commit malicioso nos lo traería al construir (ataque Atomic Arch a AUR). El `Cargo.lock` ya lo fijaba; el `rev` lo hace explícito |
+| `quipu = "0.11"` (feature `slh`) | **crates.io**, nunca por `path` | un repositorio que solo compila con un checkout hermano no lo puede construir quien lo clona, y **el verificador tiene que ser ejecutable por cualquiera** |
+| ↳ y va **SIEMPRE a la Quipu actual** | regla de la familia, **2026-08-05** | ver abajo — con su PUERTA, que es lo que la separa de la inercia |
+| `guaca` (`auditoria`) | **git, fijado por `rev`** `23395f35` (= v0.4.0) | un tag es mutable: mover `v0.3.0` a un commit malicioso nos lo traería al construir (ataque Atomic Arch a AUR). El `Cargo.lock` ya lo fijaba; el `rev` lo hace explícito |
 
-Que ese `rev` sea **hoy** la `v0.3.0` es un dato que caduca sin avisar —es
+Que ese `rev` sea **hoy** la `v0.4.0` es un dato que caduca sin avisar —es
 justamente lo que el tag puede hacer—, así que no se cree, se comprueba (así el
-2026-08-04, y coincidía):
+2026-08-05, al moverlo):
 
 ```bash
-git ls-remote https://github.com/isazajuancarlos/guaca 'refs/tags/v0.3.0^{}'
+git ls-remote https://github.com/isazajuancarlos/guaca 'refs/tags/v0.4.0^{}'
 # el `^{}` es el punto: sin él sale el objeto-tag, no el commit
 ```
 
-### Tunjo se queda en `quipu 0.10` — DECIDIDO el 2026-08-05
+### Tunjo va SIEMPRE a la versión actual de Quipu — regla del 2026-08-05
 
-Que quede escrito aquí es el punto: la duda llevaba abierta desde el 2026-08-02
-y volvía cada vez que alguien veía la 0.11 publicada. **No hay que reabrirla sin
-un hecho nuevo**, y abajo está dicho cuál sería.
+Decisión de Juan, y sustituye a la que estuvo escrita aquí unas horas de
+quedarse en la 0.10. Hoy: `quipu = "0.11"`, una sola entrada en el `Cargo.lock`.
 
-`^0.10` no casa con 0.11, así que la 0.11.0 —publicada el 2026-08-04— no llega
-ni con `cargo update`. Se comprobaron los tres motivos que podrían obligar a
-subir, y **los tres se refutan**:
+**El motivo es que Quipu es NUESTRA.** La directiva 35 —agotar la línea actual,
+el salto mayor con motivo y nunca por inercia— existe para no perseguir el
+*major* de un tercero entre visitas al cliente. Aquí quien corta la release
+decide también cuándo la toman los derivados. Y quedarse atrás cuesta lo que ir
+al día no cuesta: si guaca y tunjo no van parejos, este binario acaba con **dos
+copias de la pila cripto**.
 
-1. **El cambio de comportamiento no le toca.** La 0.11 hace que
-   `Options.codebook_id` se IGNORE. `src/clave.rs:33` llama a `encode_to_blob`
-   con `Options::default()` y no fija `codebook_id` en ningún sitio; el TUNJOKEY
-   viaja en `codebook_hash_prefix`, que es otro campo y sigue escribiéndose.
-2. **La mejora de enlazabilidad (N9) tampoco.** Poner `codebook_id` en cero
-   existe para quien pedía uno propio por autor —13 autores daban 13 huellas
-   distintas, que es el caso rojo de su banco—. Quien usa los valores por
-   defecto ya escribía la misma huella que todos: no hay nada que ganar.
-3. **El `forbid(unsafe_code)` no cambia el artefacto que consumimos.** Es cierto
-   que la 0.10.0 publicada NO lo lleva y la 0.11.0 sí (comprobado en la fuente
-   descargada del registro: 0 apariciones contra 1). Pero **0.10.0 está
-   congelada en crates.io** y su código tiene cero `unsafe` medido: para quien
-   fija esa versión, «medido cero» y «prohibido por el compilador» son el mismo
-   artefacto. El `forbid` garantiza el MAÑANA de una línea que no tendrá otro
-   0.10.x.
+**LA PUERTA, que es lo que separa la regla de la inercia: se sube, y si el
+VECTOR FIJO se pone rojo, la subida SE DETIENE y vuelve a ser una decisión.** El
+vector es `clave::una_clave_de_2026_sigue_abriendo`, y un rojo ahí dice que los
+`.clave` en manos de peritos dejaron de abrirse. **No se regenera el literal.**
 
-Y no usamos nada que solo exista en 0.11 (`papel`, `tecleable`, `qr`,
-`negacion`). Los aciertos de `papel` en `src/informe.rs` son **nuestro** módulo,
-no el de Quipu.
+**EL ORDEN SON TRES PASOS, y el tercero es el que se olvida.** Medido el
+2026-08-05: subir solo `quipu` deja el `Cargo.lock` con DOS entradas —la 0.11
+nuestra y la 0.10 que arrastra guaca por el `rev`—, porque a guaca la tomamos
+por commit fijado, no por versión.
 
-Súmese la directiva 35: en `0.x` el minor hace de major para cargo, así que
-0.10→0.11 es un salto de línea mayor y necesita un motivo, nunca inercia.
+1. guaca sube `quipu` y entra en su `main`.
+2. Aquí se mueven **`quipu` Y el `rev` de guaca, en el MISMO commit**.
+3. Control, antes de dar nada por bueno:
+   `grep -c '^name = "quipu"$' Cargo.lock` tiene que dar **1**.
 
-**Qué lo revisaría** —cualquiera de las dos, y entonces sube guaca primero
-(salida B), nunca tunjo solo:
+El `rev` se fija por COMMIT y nunca por tag —un tag es mutable—, y se comprueba
+que el commit está en el `main` remoto antes de fijarlo:
 
-- que tunjo necesite algo que solo esté en 0.11+ (el candidato realista es
-  `papel::tecleable` para el acta en papel);
-- que salga un arreglo de seguridad que toque `api`, `kdf`, `pqsign`, `escrow` o
-  `slh` — lo que usamos. El de la 0.11 iba en `negacion`, que no compilamos.
+```bash
+git ls-remote https://github.com/isazajuancarlos/guaca refs/heads/main
+```
 
-**Tunjo NUNCA sube solo** (salida C, descartada y medida): guaca depende de
-Quipu por su cuenta, así que subir aquí y no allí mete **dos copias de la pila
-cripto** en el binario (19 duplicados → 20). Compila —a guaca solo le cruzan
-bytes y `String`—, pero un ejecutable de peritaje con dos pilas dentro le da dos
-respuestas a quien audite cuál firmó.
+Hoy apunta a `23395f3` (= guaca 0.4.0), comprobado así el 2026-08-05.
 
-**La rama local `chore/quipu-0.11` (`776feef`) NO se borra.** Es la salida B ya
-hecha y probada —clippy 0, test 0, deny 0, y compatibilidad hacia atrás del
-`.clave` verificada cruzando binarios: escrito con 0.10, abierto con 0.11, misma
-pública byte a byte—. Borrarla obligaría a repetir ese trabajo el día que haya
-motivo.
+**Y por eso tunjo NUNCA sube solo**, que es la razón del paso 2: guaca depende
+de Quipu por su cuenta, así que subir aquí y no allí mete **dos copias de la
+pila cripto** en el binario (19 duplicados → 20). Compila —a guaca solo le
+cruzan bytes y `String`—, pero un ejecutable de peritaje con dos pilas dentro le
+da dos respuestas a quien audite cuál firmó.
 
-**Un cambio en Quipu o en guaca NO llega solo.** El árbol de decod va por
-`0.11.0` y aquí se pide `^0.10`, que **no casa con 0.11**: publicar una versión
-nueva de Quipu no actualiza a tunjo, y subir el requisito es una decisión que se
-toma leyendo qué cambió (`/mnt/data/decod/CLAUDE.md`), no un `cargo update`. Lo
-mismo con guaca —cuyo `CLAUDE.md` propio está en `/mnt/data/guaca`—: hasta que no
-se mueva el `rev`, aquí no entra nada.
+**Un cambio en Quipu o en guaca NO llega solo, y la regla no lo cambia — solo
+dice qué hacer cuando llegue.** En `0.x` el minor hace de major para cargo, así
+que `^0.11` no casará con la 0.12: publicar una versión nueva de Quipu **nunca**
+actualiza a tunjo por `cargo update`. Hay que venir a editar el requisito, leer
+qué cambió (`/mnt/data/decod/CLAUDE.md`) y pasar la puerta. Lo mismo con guaca
+—cuyo `CLAUDE.md` propio está en `/mnt/data/guaca`—: hasta que no se mueva el
+`rev`, aquí no entra nada.
 
 ## Comandos
 
