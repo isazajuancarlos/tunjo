@@ -115,6 +115,95 @@ fn restringir_permisos(_ruta: &Path) -> Result<()> {
 mod pruebas {
     use super::*;
 
+    /// Un `.clave` REAL generado el 2026-08-05 con quipu 0.10.0, en base64.
+    /// No se regenera: ese es el punto.
+    const CLAVE_2026: &str = "\
+        UVVJUAEAAABUVU5KT0tFWUA/+ZpR6d66bAvTLr/xrw3/pfDMWJ+yyS5kJwaE6DX6xHAj8e6fTuMA\
+        AQAAAAAAAwAAAAGZrrVXgMy1Hia5E4nudX+i8c9GMx7SN10BP1gxEFC8VgnIPiDueda2lUk8YmJa\
+        WE9ZdnGpQCsqmc9Ufsgi8eJ1QL1CQD3Zay11lejJufXpVkHmiUQni9BpKgKPFoeml8TpzwlS/uMr\
+        WucjEWapCt3mpjssX7mUTwbImQrM5mHLSvVbzIBPcnWtoulIPOyg1ByOJclxbEnTG6XjGZd0I+B6\
+        saXxmdQ1lzGqtlQW/UaFC9WMeDuwKZ2M7NNeG7wx0LkHc3lpunrR5MZfszohd3PF5ymJBd9IF0pg\
+        Z5gkCqpb0A==";
+    const FRASE_2026: &str = "contrasena-de-prueba-larga-2026";
+    /// sha256 de `verifying_key().to_bytes()` de esa clave, medido con quipu
+    /// 0.10.0 el 2026-08-05.
+    const PUBLICA_2026: &str =
+        "9c0f277bf06693dbe5d9a926bc14664d0e46c317ea99647ac4bb52bcc20cc451";
+
+    fn clave_de_2026(dir: &std::path::Path) -> std::path::PathBuf {
+        use base64::{Engine, engine::general_purpose::STANDARD};
+        let ruta = dir.join("de_2026.clave");
+        fs::write(&ruta, STANDARD.decode(CLAVE_2026).expect("base64 del vector")).unwrap();
+        ruta
+    }
+
+    fn huella_publica(sk: &TripleSigningKey) -> String {
+        use sha2::{Digest, Sha256};
+        Sha256::digest(sk.verifying_key().to_bytes())
+            .iter()
+            .map(|b| format!("{b:02x}"))
+            .collect()
+    }
+
+    /// **El vector fijo, y por qué las once pruebas de abajo no bastan.**
+    ///
+    /// Todas las demás generan el `.clave` y lo leen con el MISMO binario: miden
+    /// el códec contra sí mismo y pasarían en verde aunque el formato del
+    /// contenedor cambiara. Esta compara contra un archivo que YA existía.
+    ///
+    /// Lo que hay detrás no es estilo: de la clave del perito cuelga la firma de
+    /// todas las actas emitidas. Si `encode_to_blob`/`decode_from_blob` movieran
+    /// el formato o la derivación, los `.clave` en manos de peritos dejarían de
+    /// abrirse **y ninguna prueba de este archivo lo diría**.
+    ///
+    /// Si se pone roja al subir `quipu`, NO se regenera el literal: significa
+    /// que las claves emitidas hasta hoy dejaron de abrirse, y eso se decide, no
+    /// se tapa. Es la PUERTA de la regla «tunjo va siempre a la Quipu actual».
+    ///
+    /// Comprobada contra los dos artefactos el 2026-08-05: quipu **0.10.0** y
+    /// **0.11.0** devuelven esta misma huella.
+    #[test]
+    fn una_clave_de_2026_sigue_abriendo() {
+        let dir = tempfile::tempdir().unwrap();
+        let sk = cargar(&clave_de_2026(dir.path()), FRASE_2026)
+            .expect("el .clave de 2026-08-05 dejó de abrirse");
+        assert_eq!(
+            huella_publica(&sk),
+            PUBLICA_2026,
+            "abre, pero devuelve OTRA clave: las actas firmadas ya no verifican"
+        );
+    }
+
+    /// La pareja del vector, y falla POR LA VÍA REAL: la contraseña equivocada
+    /// sobre el MISMO archivo. No se voltea un byte del literal —eso solo
+    /// probaría que la prueba sabe decodificar base64—; se cambia la entrada
+    /// como la cambiaría un error de verdad, y tiene que fallar ANTES de
+    /// entregar ninguna clave.
+    #[test]
+    fn el_vector_no_abre_con_otra_contrasena() {
+        let dir = tempfile::tempdir().unwrap();
+        let r = cargar(&clave_de_2026(dir.path()), "otra-contrasena-igual-de-larga");
+        assert!(
+            error_de(r).contains("contraseña"),
+            "una contraseña equivocada sobre el vector no culpó a la contraseña"
+        );
+    }
+
+    /// El control de que la huella DISCRIMINA. Sin él, un `huella_publica` que
+    /// devolviera una constante pasaría el vector de arriba y no mediría nada.
+    #[test]
+    fn la_huella_distingue_dos_claves() {
+        let dir = tempfile::tempdir().unwrap();
+        let otra = dir.path().join("otra.clave");
+        generar(&otra, FRASE_2026).unwrap();
+        let sk = cargar(&otra, FRASE_2026).unwrap();
+        assert_ne!(
+            huella_publica(&sk),
+            PUBLICA_2026,
+            "dos claves distintas dan la misma huella: el vector no mide nada"
+        );
+    }
+
     #[test]
     fn ciclo_completo_de_clave() {
         let dir = tempfile::tempdir().unwrap();
