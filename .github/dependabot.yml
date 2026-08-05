@@ -46,6 +46,55 @@ updates:
       menores:
         patterns: ["*"]
         update-types: [minor]
+    # EL RACIMO QUE SE MUEVE JUNTO O NO SE MUEVE.
+    #
+    # A las dos horas de existir este archivo, Dependabot abrió tres PR que no
+    # se pueden fusionar por construcción: `const-oid` 0.9→0.10, `x509-cert`
+    # 0.2→0.3 y `p256` 0.13→0.14. El `Cargo.toml` ya decía por qué esas
+    # versiones están fijadas —«se pinean para no acabar con dos versiones
+    # incompatibles del mismo ASN.1 y tipos que no se hablan entre sí»— y el
+    # registro lo confirma: `cms` 0.2 exige `const-oid ^0.9.4`, `der ^0.7.7`,
+    # `spki ^0.7` y `x509-cert ^0.2.3`. El único `cms` que permitiría mover el
+    # racimo es 0.3.0-pre.2, una PRELIBERACIÓN, y esto se instala en casa de un
+    # cliente (directiva 35).
+    #
+    # Lo peligroso no es que fallen: es que podrían pasar el CI EN VERDE dejando
+    # dos pilas ASN.1 dentro del binario, que es justo lo que aquel comentario
+    # existe para impedir. Y volverían cada lunes.
+    #
+    # Se arregla en la REGLA, no cerrando el caso cada semana (directiva 23).
+    #
+    # SE BLOQUEA SOLO LA POSICIÓN QUE ROMPE. En un 0.x el dígito menor es el
+    # que rompe, así que se ignoran `semver-minor` y `semver-major` — y los
+    # PARCHES SIGUEN ENTRANDO, que es donde aterrizan los arreglos de seguridad
+    # dentro de una línea fijada. Bloquear el parche sería el sesgo a cerrar
+    # (directiva 21) y dejaría fuera justo lo que se quiere.
+    #
+    # `cms` NO SE IGNORA, y es deliberado: es el crate que manda en el racimo,
+    # así que su 0.3 estable es exactamente la señal que se quiere recibir. Si
+    # también lo ignorásemos, el día que se pudiera mover el racimo no se
+    # enteraría nadie — un vigilante que se calla el único evento que importa.
+    ignore:
+      # Fijados por lo que exige `cms` 0.2.
+      - dependency-name: const-oid
+        update-types: [version-update:semver-minor, version-update:semver-major]
+      - dependency-name: der
+        update-types: [version-update:semver-minor, version-update:semver-major]
+      - dependency-name: x509-cert
+        update-types: [version-update:semver-minor, version-update:semver-major]
+      - dependency-name: spki
+        update-types: [version-update:semver-minor, version-update:semver-major]
+      # La otra mitad del mismo problema: `rsa`, `p256` y `p384` hablan `digest`
+      # 0.10 y por eso convive un `sha2` 0.10 con el 0.11 del resto de tunjo.
+      # Subir uno solo mete otra línea de `digest` en el árbol.
+      - dependency-name: rsa
+        update-types: [version-update:semver-minor, version-update:semver-major]
+      - dependency-name: p256
+        update-types: [version-update:semver-minor, version-update:semver-major]
+      - dependency-name: p384
+        update-types: [version-update:semver-minor, version-update:semver-major]
+      - dependency-name: sha2
+        update-types: [version-update:semver-minor, version-update:semver-major]
     open-pull-requests-limit: 3
     commit-message:
       prefix: "chore(deps)"
