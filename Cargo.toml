@@ -43,7 +43,7 @@ serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 clap = { version = "4", features = ["derive"] }
 chrono = { version = "0.4", features = ["clock"] }
-base64 = "0.22"
+base64 = "0.23"
 walkdir = "2"
 anyhow = "1"
 rpassword = "7"
