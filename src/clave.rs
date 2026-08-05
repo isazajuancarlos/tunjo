@@ -177,14 +177,21 @@ mod pruebas {
     /// La pareja del vector, y falla POR LA VÍA REAL: la contraseña equivocada
     /// sobre el MISMO archivo. No se voltea un byte del literal —eso solo
     /// probaría que la prueba sabe decodificar base64—; se cambia la entrada
-    /// como la cambiaría un error de verdad, y tiene que fallar ANTES de
-    /// entregar ninguna clave.
+    /// como la cambiaría un error de verdad.
+    ///
+    /// **El aserto casa contra «contraseña es incorrecta», no contra
+    /// «contraseña» a secas, y la diferencia la midió una revisión.** Con el
+    /// aserto laxo esta prueba se quedaba VERDE bajo el mutante de `HUELLA`:
+    /// el mensaje de `CodebookMismatch` contiene la frase «La contraseña no se
+    /// llegó a probar», que dice literalmente lo CONTRARIO de lo que esta
+    /// prueba afirma medir y aun así la satisfacía. Una pareja que no
+    /// discrimina no valida nada, y encima da la confianza de haberlo hecho.
     #[test]
     fn el_vector_no_abre_con_otra_contrasena() {
         let dir = tempfile::tempdir().unwrap();
         let r = cargar(&clave_de_2026(dir.path()), "otra-contrasena-igual-de-larga");
         assert!(
-            error_de(r).contains("contraseña"),
+            error_de(r).contains("contraseña es incorrecta"),
             "una contraseña equivocada sobre el vector no culpó a la contraseña"
         );
     }
@@ -213,6 +220,33 @@ mod pruebas {
         let firma = sk.sign(b"acta");
         assert!(vk.verify(b"acta", &firma));
         assert_eq!(sk.verifying_key().to_bytes(), vk.to_bytes());
+
+        // Y el coste del KDF con el que se ESCRIBE una clave nueva. El vector
+        // fijo ancla el DESCIFRADO y es ciego a esto por construcción:
+        // `decode_from_blob` toma los parámetros de la cabecera del blob
+        // GUARDADO, no de `Options`. Sin este aserto, una versión futura de
+        // quipu que bajara el defecto haría cada `.clave` NUEVO más barato de
+        // romper y las once pruebas seguirían en verde.
+        //
+        // Se pregunta a la API pública y no se parsea la cabecera contando
+        // bytes: el primer intento lo hizo así, se equivocó de desplazamiento y
+        // habría quedado atado a un formato que no es nuestro.
+        let kdf = quipu::kdf::KdfParams::default();
+        assert_eq!(
+            (kdf.mem_kib, kdf.iterations, kdf.parallelism),
+            (65536, 3, 1),
+            "el KDF por defecto de quipu cambió: cada .clave nuevo se escribe \
+             con otro coste, y el vector fijo NO lo ve"
+        );
+
+        // 0o600 en el archivo de clave. `restringir_permisos` no tenía una sola
+        // prueba: borrarlo dejaba la suite entera en verde.
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            let modo = fs::metadata(&ruta).unwrap().permissions().mode() & 0o777;
+            assert_eq!(modo, 0o600, "la clave privada quedó legible por otros");
+        }
     }
 
     #[test]
@@ -268,7 +302,12 @@ mod pruebas {
 
         let e = error_de(cargar(&ruta, "la buena"));
         assert!(e.contains("NO una clave de tunjo"), "{e}");
-        assert!(e.contains("TUNJOKEY"), "dice qué marca falta — {e}");
+        // Contra la CONSTANTE, no contra una copia del texto: con el literal
+        // pegado, esta prueba se caía al renombrar la marca —un cambio
+        // legítimo— y se arreglaba editando el test, que es justo lo que el
+        // CLAUDE.md prohíbe en su sección de pruebas.
+        let marca = String::from_utf8_lossy(&HUELLA).to_string();
+        assert!(e.contains(&marca), "dice qué marca falta — {e}");
         assert!(
             !e.contains("contraseña es incorrecta"),
             "la contraseña era la BUENA y ni se llegó a probar — {e}"
