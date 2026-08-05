@@ -46,6 +46,73 @@ updates:
       menores:
         patterns: ["*"]
         update-types: [minor]
+    # EL RACIMO QUE SE MUEVE JUNTO O NO SE MUEVE.
+    #
+    # A las dos horas de existir este archivo, Dependabot abrió tres PR que no
+    # se pueden fusionar por construcción: `const-oid` 0.9→0.10, `x509-cert`
+    # 0.2→0.3 y `p256` 0.13→0.14. El `Cargo.toml` ya decía por qué esas
+    # versiones están fijadas —«se pinean para no acabar con dos versiones
+    # incompatibles del mismo ASN.1 y tipos que no se hablan entre sí»— y el
+    # registro lo confirma: `cms` 0.2 exige `const-oid ^0.9.4`, `der ^0.7.7`,
+    # `spki ^0.7` y `x509-cert ^0.2.3`. El único `cms` que permitiría mover el
+    # racimo es 0.3.0-pre.2, una PRELIBERACIÓN, y esto se instala en casa de un
+    # cliente (directiva 35).
+    #
+    # Lo peligroso no es que fallen: es que podrían pasar el CI EN VERDE dejando
+    # dos pilas ASN.1 dentro del binario, que es justo lo que aquel comentario
+    # existe para impedir. Y volverían cada lunes.
+    #
+    # Se arregla en la REGLA, no cerrando el caso cada semana (directiva 23).
+    #
+    # SE BLOQUEA SOLO LA POSICIÓN QUE ROMPE. En un 0.x el dígito menor es el
+    # que rompe, así que se ignoran `semver-minor` y `semver-major` — y los
+    # PARCHES SIGUEN ENTRANDO, que es donde aterrizan los arreglos de seguridad
+    # dentro de una línea fijada. Bloquear el parche sería el sesgo a cerrar
+    # (directiva 21) y dejaría fuera justo lo que se quiere.
+    #
+    # `cms` NO SE IGNORA, y es deliberado: es el crate que manda en el racimo,
+    # así que su 0.3 estable es exactamente la señal que se quiere recibir. Si
+    # también lo ignorásemos, el día que se pudiera mover el racimo no se
+    # enteraría nadie — un vigilante que se calla el único evento que importa.
+    #
+    # LO QUE NO SABEMOS, dicho en vez de supuesto: no está claro si estos
+    # `ignore` silencian TAMBIÉN las actualizaciones de SEGURIDAD, además de las
+    # de versión. Se buscó en la documentación de GitHub el 2026-08-04 —la
+    # referencia de opciones y la de configurar actualizaciones de seguridad— y
+    # ninguna de las dos lo afirma ni lo niega.
+    #
+    # Así que NO se cuenta con Dependabot para eso, y no hace falta: quien
+    # detecta aquí un RUSTSEC es `cargo deny check`, que corre como trabajo
+    # OBLIGATORIO del CI en cada PR y en cada commit de `main`, mira el árbol
+    # entero y no sabe nada de este archivo. Un aviso sobre `rsa` 0.9 pone ese
+    # check en rojo aunque Dependabot no abra un solo PR. Dependabot es la
+    # comodidad; el `deny` es la puerta.
+    #
+    # Si algún día hiciera falta que un arreglo de seguridad que EXIGE saltar de
+    # línea llegue por PR, la salida no es quitar estos `ignore` —volverían los
+    # tres PR inmergeables— sino mover el racimo entero a mano, que es la
+    # decisión que este bloque describe.
+    ignore:
+      # Fijados por lo que exige `cms` 0.2.
+      - dependency-name: const-oid
+        update-types: [version-update:semver-minor, version-update:semver-major]
+      - dependency-name: der
+        update-types: [version-update:semver-minor, version-update:semver-major]
+      - dependency-name: x509-cert
+        update-types: [version-update:semver-minor, version-update:semver-major]
+      - dependency-name: spki
+        update-types: [version-update:semver-minor, version-update:semver-major]
+      # La otra mitad del mismo problema: `rsa`, `p256` y `p384` hablan `digest`
+      # 0.10 y por eso convive un `sha2` 0.10 con el 0.11 del resto de tunjo.
+      # Subir uno solo mete otra línea de `digest` en el árbol.
+      - dependency-name: rsa
+        update-types: [version-update:semver-minor, version-update:semver-major]
+      - dependency-name: p256
+        update-types: [version-update:semver-minor, version-update:semver-major]
+      - dependency-name: p384
+        update-types: [version-update:semver-minor, version-update:semver-major]
+      - dependency-name: sha2
+        update-types: [version-update:semver-minor, version-update:semver-major]
     open-pull-requests-limit: 3
     commit-message:
       prefix: "chore(deps)"
