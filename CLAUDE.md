@@ -24,16 +24,26 @@ una app de peritaje, no una librería—.
 |---|---|---|
 | `quipu = "0.11"` (feature `slh`) | **crates.io**, nunca por `path` | un repositorio que solo compila con un checkout hermano no lo puede construir quien lo clona, y **el verificador tiene que ser ejecutable por cualquiera** |
 | ↳ y va **SIEMPRE a la Quipu actual** | regla de la familia, **2026-08-05** | ver abajo — con su PUERTA, que es lo que la separa de la inercia |
-| `guaca` (`auditoria`) | **git, fijado por `rev`** `23395f35` (= v0.4.0) | un tag es mutable: mover `v0.3.0` a un commit malicioso nos lo traería al construir (ataque Atomic Arch a AUR). El `Cargo.lock` ya lo fijaba; el `rev` lo hace explícito |
+| `guaca` (`auditoria`) | **git, fijado por `rev`** `23395f35` — **NO es el tag `v0.4.0`**, ver abajo | un tag es mutable: moverlo a un commit malicioso nos lo traería al construir (ataque Atomic Arch a AUR). El `Cargo.lock` ya lo fijaba; el `rev` lo hace explícito |
 
-Que ese `rev` sea **hoy** la `v0.4.0` es un dato que caduca sin avisar —es
-justamente lo que el tag puede hacer—, así que no se cree, se comprueba (así el
-2026-08-05, al moverlo):
+**El `rev` fijado NO es el tag `v0.4.0`, y confundirlos deshace el salto.** Lo
+dijo una revisión el 2026-08-05, y aquí ponía lo contrario:
 
-```bash
-git ls-remote https://github.com/isazajuancarlos/guaca 'refs/tags/v0.4.0^{}'
-# el `^{}` es el punto: sin él sale el objeto-tag, no el commit
 ```
+refs/tags/v0.4.0^{}  -> d786d1c3…   y ese commit pide quipu = "0.10"
+rev fijado / main    -> 23395f35…   quipu = "0.11"
+```
+
+Son **9 commits** de distancia. Quien vea el desacuerdo y «alinee» el `rev` al
+tag devuelve guaca a la 0.10 **en silencio** y mete dos entradas de quipu en el
+lock — justo lo que el paso 2 existe para evitar. Si algún día se quiere que
+coincidan, se mueve el TAG de guaca hacia delante; nunca el `rev` hacia atrás.
+
+Y una lección de método que se queda escrita porque el error fue mío: aquí puso
+un `ls-remote` contra el tag con la frase «comprobado así el 2026-08-05», y ese
+comando **nunca se corrió** — se corrió el de `main`. Si se hubiera corrido,
+habría salido en desacuerdo. Una comprobación que se escribe sin ejecutar es un
+negativo que nadie produjo (directiva 30).
 
 ### Tunjo va SIEMPRE a la versión actual de Quipu — regla del 2026-08-05
 
@@ -62,14 +72,17 @@ por commit fijado, no por versión.
 3. Control, antes de dar nada por bueno:
    `grep -c '^name = "quipu"$' Cargo.lock` tiene que dar **1**.
 
-El `rev` se fija por COMMIT y nunca por tag —un tag es mutable—, y se comprueba
-que el commit está en el `main` remoto antes de fijarlo:
+El `rev` se fija por COMMIT y nunca por tag —un tag es mutable—, y antes de
+fijarlo se comprueba que el commit **está en `main`**. La forma que NO caduca es
+la de alcanzabilidad, no la de igualdad: `main` recibe commits y una comparación
+exacta se rompe sola aunque el `rev` siga siendo perfectamente válido.
 
 ```bash
-git ls-remote https://github.com/isazajuancarlos/guaca refs/heads/main
+git -C /mnt/data/guaca fetch -q origin
+git -C /mnt/data/guaca merge-base --is-ancestor <rev> origin/main && echo alcanzable
 ```
 
-Hoy apunta a `23395f3` (= guaca 0.4.0), comprobado así el 2026-08-05.
+Comprobado así el 2026-08-05 para `23395f35`.
 
 **Y por eso tunjo NUNCA sube solo**, que es la razón del paso 2: guaca depende
 de Quipu por su cuenta, así que subir aquí y no allí mete **dos copias de la
