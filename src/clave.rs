@@ -233,19 +233,36 @@ mod pruebas {
         }
     }
 
-    /// La pareja del anterior: una clave pública REAL, codificada como la
-    /// codifica `firmante`, tiene que dar exactamente esta cadena.
+    /// La pareja del anterior: una clave pública REAL tiene que codificarse
+    /// exactamente en esta cadena.
     ///
-    /// Los siete casos de arriba son sintéticos y podrían pasar con un códec
-    /// correcto sobre el alfabeto equivocado si alguien cambiara la constante que
-    /// usa `custodia`. Éste va contra el ARTEFACTO: la misma clave del vector de
-    /// 2026, por la misma vía que `custodia::firmante`.
+    /// **QUÉ CUBRE Y QUÉ NO, corregido tras medirlo.** La primera redacción decía
+    /// que iba «por la misma vía que `custodia::firmante`», y las dos mitades de
+    /// esa frase eran falsas: `firmante` codifica la FIRMA, no la clave pública
+    /// —ésa se codifica en `custodia.rs:224` (`iniciar`) y `sellado.rs:64`
+    /// (`sellar`)—, y esta prueba **replica la expresión** con su propio `use`, no
+    /// llama a aquéllas. Comprobado: cambiando el motor en `custodia.rs`, esta
+    /// prueba sigue VERDE.
+    ///
+    /// Lo cual no la deja sin trabajo, porque la amenaza declarada es otra: un
+    /// BUMP de la librería base64, y ante eso todos los `general_purpose::STANDARD`
+    /// se mueven a la vez y este centinela es fiel. Quien cubre la vía real de
+    /// `custodia` es `tests/veredictos.rs`.
+    ///
+    /// Se deja escrito porque un comentario que atribuye a una prueba una barrera
+    /// que no tiene es peor que no tener el comentario: el siguiente que lea esto
+    /// podría borrar las que sí trabajan creyéndolas redundantes.
+    ///
+    /// Frente a los siete casos sintéticos, éste aporta los 64 símbolos del
+    /// alfabeto (aquéllos tocan 11) y 3 584 caracteres, que además cazarían un
+    /// motor tipo MIME que partiera líneas.
     #[test]
     fn la_clave_publica_del_perito_de_2026_se_codifica_igual() {
         use base64::{Engine, engine::general_purpose::STANDARD};
 
         let dir = tempfile::tempdir().unwrap();
-        let sk = cargar(&clave_de_2026(dir.path()), FRASE_2026).unwrap();
+        let sk = cargar(&clave_de_2026(dir.path()), FRASE_2026)
+            .expect("el .clave de 2026-08-05 dejó de abrirse");
         let publica = STANDARD.encode(sk.verifying_key().to_bytes());
         // Se compara el SHA-256 del TEXTO base64, no el texto: la clave triple
         // híbrida son ~4 KB codificados y pegarlos aquí no lo leería nadie. El
