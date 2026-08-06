@@ -125,6 +125,12 @@ mod pruebas {
         saXxmdQ1lzGqtlQW/UaFC9WMeDuwKZ2M7NNeG7wx0LkHc3lpunrR5MZfszohd3PF5ymJBd9IF0pg\
         Z5gkCqpb0A==";
     const FRASE_2026: &str = "contrasena-de-prueba-larga-2026";
+    /// sha256 del TEXTO base64 de esa misma clave pública, medido el 2026-08-06
+    /// con base64 0.23.0. Es el vector de la dirección ENCODE: cambia con un solo
+    /// símbolo del alfabeto o un `=` de relleno de más.
+    const HUELLA_B64_2026: &str =
+        "497fcc3aac97a252ced427af5a47ed0e0624df23e2933c39a8a87eff5bbd842d";
+
     /// sha256 de `verifying_key().to_bytes()` de esa clave, medido con quipu
     /// 0.10.0 el 2026-08-05.
     const PUBLICA_2026: &str =
@@ -171,6 +177,108 @@ mod pruebas {
             huella_publica(&sk),
             PUBLICA_2026,
             "abre, pero devuelve OTRA clave: las actas firmadas ya no verifican"
+        );
+    }
+
+    /// **EL VECTOR EN LA DIRECCIÓN CONTRARIA: que `encode` siga produciendo lo
+    /// mismo.**
+    ///
+    /// `una_clave_de_2026_sigue_abriendo` cubre DECODIFICAR —lee un `.clave`
+    /// literal de 2026 y comprueba la clave que sale—, y eso deja la otra mitad
+    /// sin nadie: el resto del banco codifica y decodifica con el MISMO binario,
+    /// así que pasa igual si el formato de SALIDA cambia.
+    ///
+    /// Y esa mitad decide algo. `custodia.rs:310` compara
+    /// `cadena.clave_publica != ancla.clave_publica` **como TEXTO** para
+    /// dictaminar `Veredicto::FirmanteAjeno`. Si el relleno o el alfabeto de
+    /// salida se movieran, un acta sellada por un binario viejo daría
+    /// `FirmanteAjeno` ESPURIO contra una cadena sellada por uno nuevo — un
+    /// peritaje que se declara falso sin que nada esté mal. La verificación de
+    /// firmas no corre ese riesgo (va siempre contra el texto ALMACENADO, no
+    /// contra una recodificación), pero la identidad del perito sí.
+    ///
+    /// Lo levantó la revisión de seguridad del bump de base64 a 0.23 el
+    /// 2026-08-06: el formato no se movió —1 202 vectores comprobados contra las
+    /// dos versiones, 0 diferencias— pero nada en este repositorio lo sujetaba.
+    ///
+    /// Los bytes son fijos y elegidos para que el vector muerda: incluyen el
+    /// caso de relleno (`len % 3 == 1` y `== 2`), y los valores 62 y 63, que son
+    /// los dos únicos símbolos donde `STANDARD` (`+/`) y `URL_SAFE` (`-_`)
+    /// difieren.
+    #[test]
+    fn codificar_en_base64_sigue_dando_lo_mismo() {
+        use base64::{Engine, engine::general_purpose::STANDARD};
+
+        // 62 y 63 salen de estos tres bytes: 0xFB 0xEF 0xBE -> "++++"... se
+        // comprueba abajo con el literal, que es lo que manda.
+        const CASOS: &[(&[u8], &str)] = &[
+            (b"", ""),
+            (b"t", "dA=="),                       // relleno de dos
+            (b"tu", "dHU="),                      // relleno de uno
+            (b"tunjo", "dHVuam8="),
+            (&[0xFB, 0xEF, 0xBE], "++++"),        // los símbolos 62 y 63 de STANDARD
+            (&[0xFF, 0xFF, 0xFF], "////"),
+            (&[0x00, 0x00, 0x00], "AAAA"),
+        ];
+        for (bytes, esperado) in CASOS {
+            assert_eq!(
+                &STANDARD.encode(bytes),
+                esperado,
+                "`STANDARD.encode` cambió de formato. `custodia.rs:310` compara la \
+                 clave pública COMO TEXTO para decidir `FirmanteAjeno`: con el \
+                 formato movido, un acta vieja y una cadena nueva del MISMO perito \
+                 dejan de corresponder. NO se regenera este literal sin decidir qué \
+                 pasa con los peritajes ya sellados."
+            );
+        }
+    }
+
+    /// La pareja del anterior: una clave pública REAL tiene que codificarse
+    /// exactamente en esta cadena.
+    ///
+    /// **QUÉ CUBRE Y QUÉ NO, corregido tras medirlo.** La primera redacción decía
+    /// que iba «por la misma vía que `custodia::firmante`», y las dos mitades de
+    /// esa frase eran falsas: `firmante` codifica la FIRMA, no la clave pública
+    /// —ésa se codifica en `custodia.rs:224` (`iniciar`) y `sellado.rs:64`
+    /// (`sellar`)—, y esta prueba **replica la expresión** con su propio `use`, no
+    /// llama a aquéllas. Comprobado: cambiando el motor en `custodia.rs`, esta
+    /// prueba sigue VERDE.
+    ///
+    /// Lo cual no la deja sin trabajo, porque la amenaza declarada es otra: un
+    /// BUMP de la librería base64, y ante eso todos los `general_purpose::STANDARD`
+    /// se mueven a la vez y este centinela es fiel. Quien cubre la vía real de
+    /// `custodia` es `tests/veredictos.rs`.
+    ///
+    /// Se deja escrito porque un comentario que atribuye a una prueba una barrera
+    /// que no tiene es peor que no tener el comentario: el siguiente que lea esto
+    /// podría borrar las que sí trabajan creyéndolas redundantes.
+    ///
+    /// Frente a los siete casos sintéticos, éste aporta los 64 símbolos del
+    /// alfabeto (aquéllos tocan 11) y 3 584 caracteres, que además cazarían un
+    /// motor tipo MIME que partiera líneas.
+    #[test]
+    fn la_clave_publica_del_perito_de_2026_se_codifica_igual() {
+        use base64::{Engine, engine::general_purpose::STANDARD};
+
+        let dir = tempfile::tempdir().unwrap();
+        let sk = cargar(&clave_de_2026(dir.path()), FRASE_2026)
+            .expect("el .clave de 2026-08-05 dejó de abrirse");
+        let publica = STANDARD.encode(sk.verifying_key().to_bytes());
+        // Se compara el SHA-256 del TEXTO base64, no el texto: la clave triple
+        // híbrida son ~4 KB codificados y pegarlos aquí no lo leería nadie. El
+        // hash es igual de sensible al formato —cambia con un solo símbolo o un
+        // `=` de más— y cabe en una línea.
+        let huella: String = {
+            use sha2::{Digest, Sha256};
+            Sha256::digest(publica.as_bytes()).iter().map(|b| format!("{b:02x}")).collect()
+        };
+
+        // Medido el 2026-08-06 con base64 0.23.0 sobre el `.clave` de 2026-08-05.
+        assert_eq!(
+            huella, HUELLA_B64_2026,
+            "la clave pública del perito de 2026 se codifica distinto: \
+             `custodia.rs:310` la compara como texto y el acta dejaría de \
+             corresponder con su cadena"
         );
     }
 
