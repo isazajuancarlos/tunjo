@@ -1,0 +1,216 @@
+<!DOCTYPE html>
+<!--
+SPDX-FileCopyrightText: 2026 Juan Carlos Isaza
+SPDX-License-Identifier: AGPL-3.0-or-later
+Página del kit de tunjo. El JS va en ./app.js (externo, no inline) para servirse
+bajo CSP `script-src 'self' 'wasm-unsafe-eval'` sin `'unsafe-inline'`; el estilo sí
+es inline (requiere `style-src 'unsafe-inline'` o migrarlo a .css). Co-marca con
+Xiliux por decisión 0009.
+-->
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>tunjo — sellado criptográfico de evidencia digital</title>
+<meta name="description" content="tunjo sella evidencia digital y levanta el acta de cadena de custodia con firma post-cuántica, siguiendo el método que la Corte Suprema de Justicia fijó en SP248-2025. Cualquiera verifica la integridad y la firma, gratis, en su propia máquina y sin subir nada.">
+<style>
+  :root{
+    --void:#0e0f13; --panel:#15171d; --line:#262a33;
+    --ivory:#e9e5db; --muted:#9aa1ab; --phosphor:#93a8bd; --mark:#c0485a;
+    --mono:ui-monospace,"Cascadia Code","Fira Code",Menlo,Consolas,monospace;
+    --serif:"Iowan Old Style","Palatino Linotype",Palatino,Georgia,serif;
+  }
+  *{box-sizing:border-box}
+  html{scroll-behavior:smooth}
+  body{margin:0;background:var(--void);color:var(--ivory);
+    font-family:var(--serif);line-height:1.6;font-size:18px;
+    -webkit-font-smoothing:antialiased}
+  .envoltura{max-width:860px;margin:0 auto;padding:0 20px}
+  a{color:var(--phosphor);text-decoration:none;border-bottom:1px solid transparent}
+  a:hover{border-bottom-color:var(--phosphor)}
+  h1,h2,h3{font-weight:600;line-height:1.2;letter-spacing:-.01em}
+  h1{font-size:2.5rem;margin:.2em 0}
+  h2{font-size:1.6rem;margin:2.4em 0 .6em;padding-bottom:.3em;border-bottom:1px solid var(--line)}
+  h3{font-size:1.15rem;margin:1.4em 0 .3em;color:var(--phosphor)}
+  p{margin:.7em 0}
+  code,kbd{font-family:var(--mono);font-size:.86em}
+  .marca{color:var(--mark)}
+  header{padding:64px 0 28px;border-bottom:1px solid var(--line)}
+  .logo-tunjo{font-family:var(--mono);font-size:1.1rem;letter-spacing:.35em;
+    color:var(--muted);text-transform:lowercase}
+  .lede{font-size:1.3rem;color:var(--muted);max-width:40ch}
+  .firma{margin-top:18px;font-size:.95rem;color:var(--muted)}
+  .destacado{background:var(--panel);border:1px solid var(--line);border-left:3px solid var(--mark);
+    border-radius:6px;padding:16px 20px;margin:1.4em 0;font-size:1.05rem}
+  .tarjetas{display:grid;grid-template-columns:1fr;gap:14px;margin:1.2em 0}
+  @media(min-width:680px){.tarjetas{grid-template-columns:repeat(3,1fr)}}
+  .tarjeta{background:var(--panel);border:1px solid var(--line);border-radius:8px;padding:18px}
+  .tarjeta h3{margin-top:0}
+  .tarjeta p{font-size:.95rem;color:var(--muted)}
+  pre{background:#0a0b0e;border:1px solid var(--line);border-radius:8px;
+    padding:16px;overflow-x:auto;font-family:var(--mono);font-size:.82rem;
+    line-height:1.5;color:#cdd6e0}
+  pre .c{color:#6b7280}
+  table{width:100%;border-collapse:collapse;margin:1.2em 0;font-size:.92rem}
+  th,td{text-align:left;padding:9px 10px;border-bottom:1px solid var(--line);vertical-align:top}
+  th{color:var(--phosphor);font-weight:600}
+  ul{padding-left:1.1em} li{margin:.35em 0}
+  .sha{font-family:var(--mono);font-size:.72rem;color:var(--muted);word-break:break-all}
+  .limite{color:var(--muted);font-size:.95rem}
+  .verif{background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:20px;margin:1.2em 0}
+  .campo{margin-bottom:16px}
+  .campo label{display:block;margin-bottom:7px;font-size:.98rem}
+  input[type=file]{width:100%;color:var(--muted);font-family:var(--mono);font-size:.82rem;
+    background:#0a0b0e;border:1px dashed var(--line);border-radius:7px;padding:12px;cursor:pointer}
+  input[type=file]::file-selector-button{font-family:var(--serif);background:var(--line);
+    color:var(--ivory);border:0;border-radius:5px;padding:7px 12px;margin-right:12px;cursor:pointer}
+  .verdicto{font-family:var(--serif);font-size:1.3rem;font-weight:600;padding:14px 16px;border-radius:8px;margin:4px 0 14px}
+  .v-ok{background:#10251a;border:1px solid #1f6f47;color:#7fe0a8}
+  .v-mal{background:#2a1416;border:1px solid #7a2630;color:#f0909c}
+  .v-aviso{background:#2a2410;border:1px solid #7a6a26;color:#f0d890}
+  .meta-acta{font-size:.9rem;color:var(--muted);margin:.3em 0}
+  .meta-acta b{color:var(--ivory)}
+  .elem{font-family:var(--mono);font-size:.78rem;border-bottom:1px solid var(--line);padding:7px 0;
+    display:flex;justify-content:space-between;gap:10px;align-items:center}
+  .elem .ruta{word-break:break-all}
+  .cot-ok{color:#7fe0a8;white-space:nowrap}
+  .cot-mal{color:#f0909c;white-space:nowrap}
+  .cot-na{color:var(--muted);white-space:nowrap}
+  footer{margin-top:3em;padding:28px 0 64px;border-top:1px solid var(--line);
+    color:var(--muted);font-size:.9rem}
+  .xiliux{display:flex;align-items:center;gap:12px;margin-top:18px}
+  .xiliux img{width:38px;height:38px;border-radius:7px}
+  .nota-fuerte{color:var(--ivory)}
+</style>
+</head>
+<body>
+
+<header><div class="envoltura">
+  <div class="logo-tunjo">tunjo</div>
+  <h1>La prueba digital, <span class="marca">verificable por cualquiera</span>.</h1>
+  <p class="lede">Sellado criptográfico de evidencia digital y acta de cadena de custodia, con firma post-cuántica.</p>
+  <p class="firma">por Juan Carlos Isaza · software libre (AGPL-3.0) · construido sobre <a href="#autoria">Quipu</a></p>
+</div></header>
+
+<main class="envoltura">
+
+  <div class="destacado">
+    Un peritaje informático no suele perderse por no identificar al responsable. Se
+    pierde antes: cuando la contraparte pregunta <span class="nota-fuerte">cómo sabemos que esos
+    archivos son los que el perito recibió, y no los que editó después</span>. tunjo responde esa
+    pregunta de forma que <span class="nota-fuerte">un tercero compruebe la integridad y la firma
+    por su cuenta</span> —en su propia máquina, sin subir nada y sin pedirle nada al perito—, y
+    confirme que la firma es de ese perito cotejando la huella de su clave.
+  </div>
+
+  <h2 id="para-quien">Para quién, y qué hace cada uno</h2>
+  <div class="tarjetas">
+    <div class="tarjeta">
+      <h3>Perito</h3>
+      <p>Sella el material recibido y levanta el acta y la cadena de custodia. El acta es el soporte metodológico que anexa a su dictamen.</p>
+    </div>
+    <div class="tarjeta">
+      <h3>Abogado</h3>
+      <p>Argumenta con un acta que habla el idioma de la Corte: integridad acreditada, no un pantallazo que la contraparte tacha.</p>
+    </div>
+    <div class="tarjeta">
+      <h3>Juez · contraparte</h3>
+      <p>Verifica la integridad y la firma <span class="nota-fuerte">por su cuenta, gratis</span>, con el verificador público, sin pedirle nada al perito.</p>
+    </div>
+  </div>
+
+  <h2 id="metodo">El método que fijó la Corte Suprema</h2>
+  <p>La Sala de Casación Penal, en la sentencia <strong>SP248-2025</strong> (radicación 58275,
+  M.P. Gerson Chaverra Castro), ordenó en tres fases cómo se incorpora la evidencia digital.
+  tunjo implementa, con criptografía, lo que esa providencia exige:</p>
+  <table>
+    <tr><th>Fase / criterio de SP248-2025</th><th>Lo que pone tunjo</th></tr>
+    <tr><td>Recolección — no alterar el origen</td><td>No escribe nunca dentro del origen; registra el método, la herramienta y el <em>fundamento</em> legal de la adquisición</td></tr>
+    <tr><td>Integralidad · inalterabilidad</td><td>SHA-256 por elemento + raíz de Merkle + firma triple (Ed25519 + ML-DSA-87 + SLH-DSA)</td></tr>
+    <tr><td>Auditabilidad</td><td>El acta y la cadena de custodia encadenan y firman cada eslabón; borrar o reordenar la rompe</td></tr>
+    <tr><td>Accesibilidad · repetibilidad</td><td>Verificador público: cualquiera recomputa y verifica sin el perito y sin pagar</td></tr>
+    <tr><td>Autenticación (CPP art. 426)</td><td>El acta legible es el soporte del informe del experto, que el perito defiende en juicio</td></tr>
+  </table>
+  <p class="limite">La Corte también fijó dos cosas que tunjo respeta: el hash es <em>medio</em> de
+  acreditar integridad, no un requisito legal; y las guías técnicas (ISO/IEC 27037) son
+  lineamientos, no mandatos. Y la Corte Constitucional (<strong>T-043/2020</strong>) recordó que un
+  pantallazo de WhatsApp vale apenas como <em>prueba indiciaria</em>, porque es alterable — por eso
+  tunjo sella el formato original, no una captura.</p>
+
+  <h2 id="aqui">Verifique un acta aquí mismo</h2>
+  <p>El verificador corre <strong>dentro de su navegador</strong> (WebAssembly). Usa la
+  <strong>misma verificación del binario</strong> —raíz de Merkle, firma triple y el token RFC 3161—
+  compilada a la web: <strong>nada se sube a ningún servidor</strong>, nada se instala, y comprueba
+  en su propia máquina. Elija el <code>acta.json</code>; si quiere cotejar también el contenido,
+  añada los archivos de la evidencia.</p>
+
+  <div class="verif">
+    <div class="campo">
+      <label for="f-acta"><strong>1. El acta</strong> (<code>acta.json</code>)</label>
+      <input type="file" id="f-acta" accept=".json,application/json">
+    </div>
+    <div class="campo">
+      <label for="f-arch"><strong>2. Los archivos de la evidencia</strong> (opcional, para cotejar contenido)</label>
+      <input type="file" id="f-arch" multiple>
+    </div>
+    <div id="verif-estado" class="limite">Cargando el verificador…</div>
+    <div id="verif-resultado" hidden></div>
+  </div>
+
+  <h2 id="limites">Lo que NO hace, y es deliberado</h2>
+  <ul>
+    <li><strong>No concluye</strong> — ni intrusión, ni autoría, ni responsabilidad. Eso es del dictamen del perito. Una herramienta que concluye se derrumba en el contrainterrogatorio.</li>
+    <li><strong>No prueba el pasado</strong> — acredita desde el instante de la adquisición. Si el material ya venía alterado, el sello certifica fielmente material alterado.</li>
+    <li>Su firma es <strong>firma electrónica</strong> del Decreto 2364 de 2012, nunca «firma digital» del art. 28 de la Ley 527 — y así se nombra siempre.</li>
+  </ul>
+
+  <h2 id="verificar">Cómo verificar un acta usted mismo</h2>
+  <p>Con el <strong>verificador público</strong> —el mismo código, sin poder sellar— cualquiera
+  comprueba un acta. No hay que instalar nada que exija confianza: el binario solo lee y verifica.</p>
+<pre><span class="c"># 1. Verifica la firma y la coherencia interna del acta.</span>
+tunjo verificar acta.json
+
+<span class="c"># 2. Compruébala además contra los archivos, byte a byte.</span>
+tunjo verificar acta.json --origen /ruta/a/la/evidencia
+
+<span class="c"># 3. Con la raíz de la autoridad de sellado, confirma la fecha cierta.</span>
+tunjo verificar acta.json --tsa-ca raiz-tsa.pem</pre>
+  <p>Códigos de salida: <code>0</code> conforme · <code>1</code> la verificación falló (mira las
+  discrepancias) · <code>2</code> error de operación. En <code>ejemplo/muestra.json</code> hay un acta
+  de demostración (no es un caso real) para probarlo de inmediato: <code>tunjo verificar
+  ejemplo/muestra.json</code>.</p>
+
+  <h2 id="herramienta">La herramienta</h2>
+  <p>tunjo es software libre bajo <strong>AGPL-3.0</strong>. El origen de verdad es el código, y se
+  construye desde la fuente —auditable por quien quiera—:</p>
+<pre><span class="c"># Binario del PERITO (sella y verifica).</span>
+cargo build --release
+
+<span class="c"># Binario PÚBLICO (solo verifica; el que se entrega a juez y contraparte).</span>
+cargo build --release --no-default-features</pre>
+  <p class="limite">El verificador público y un acta de muestra pueden acompañar cada entrega, para
+  que quien reciba el dictamen compruebe sin depender de nadie.</p>
+
+  <h2 id="autoria">Autoría y procedencia</h2>
+  <p>Autor: <strong>Juan Carlos Isaza</strong> (Medellín, Colombia). tunjo toma su firma
+  triple-híbrida post-cuántica de <strong>Quipu</strong>, la librería de criptografía del autor.
+  El nombre viene del <em>tunjo</em> muisca: la figura de tumbaga con la que se dejaba constancia
+  sellada de un acto.</p>
+  <p class="sha">SP248-2025 — SHA-256 del PDF oficial de la CSJ:<br>fa4673356b0437c8605681ae5ce2431c61e1449c79c5f4cd4f27fe47f9fe3051</p>
+
+</main>
+
+<script type="module" src="./app.js"></script>
+
+<footer><div class="envoltura">
+  <p>tunjo · sellado de evidencia digital · AGPL-3.0-or-later · © 2026 Juan Carlos Isaza.</p>
+  <p>Esta página no concluye ni asesora: documenta una herramienta y su método. El dictamen lo
+  firma el perito.</p>
+  <a class="xiliux" href="https://xiliux.com" rel="noopener">
+    <img src="xiliux-logo.webp" alt="Xiliux" width="38" height="38">
+    <span>Un proyecto de <strong>Xiliux</strong> — xiliux.com</span>
+  </a>
+</div></footer>
+
+</body>
+</html>

@@ -1,0 +1,156 @@
+// SPDX-FileCopyrightText: 2026 Juan Carlos Isaza
+// SPDX-License-Identifier: AGPL-3.0-or-later
+//! El sellado propiamente dicho.
+//!
+//! Vive aquí y no en `main` para que las pruebas ejerciten exactamente el mismo
+//! camino que el CLI. Una prueba que reimplementa lo que verifica no prueba
+//! nada: pasa por su propia lógica, no por la del programa.
+
+use std::path::Path;
+
+use anyhow::{Context, Result, bail};
+use base64::{Engine, engine::general_purpose::STANDARD};
+use chrono::{Local, SecondsFormat, Utc};
+use quipu::pqsign::TripleSigningKey;
+
+use crate::acta::{ALGORITMOS, Acta, Adquisicion, Caso, FORMATO, Firma, Perito, Reloj};
+use crate::recoleccion;
+
+/// Lo que el perito declara y la herramienta no puede deducir.
+pub struct Datos {
+    pub referencia: String,
+    pub descripcion: String,
+    pub perito: String,
+    pub identificacion: String,
+    pub metodo: String,
+    /// Fundamento legal de la adquisición (bajo qué título llegó el material).
+    /// `None` queda escrito como NO DECLARADO: igual que el reloj, la ausencia se
+    /// hace explícita, no se calla.
+    pub fundamento: Option<String>,
+    /// Referencia del título (radicado del auto, número de diligencia, oficio del
+    /// informe). `None` o vacío queda vacío y se muestra «—»: a diferencia del
+    /// fundamento, su ausencia es legítima (no toda vía tiene radicado), así que
+    /// no se grita NO DECLARADO.
+    pub titulo_referencia: Option<String>,
+    /// Cómo se contrastó el reloj. `None` queda escrito como NO VERIFICADO: el
+    /// acta nunca calla la ausencia de un dato ni la rellena con un supuesto.
+    pub reloj: Option<String>,
+    /// Permite sellar con elementos ilegibles, dejando constancia de cada uno.
+    pub admitir_ilegibles: bool,
+    /// URL de la autoridad de sellado RFC 3161. `None` = sin sello de tiempo,
+    /// y entonces el acta prueba orden relativo pero no fecha cierta.
+    pub autoridad_sello: Option<String>,
+}
+
+/// Un dato que el perito «declara» pero que, tras recortar espacios, está vacío NO
+/// es un dato: es una ausencia. `--fundamento ""` o `--reloj "   "` —el error de
+/// operador más común, una variable de lote sin valor— colados como «declarado»
+/// dejarían el acta CALLANDO lo que el centinela («NO DECLARADO» / «NO VERIFICADO»)
+/// existe para decir (D20). `fundamento` y `reloj` comparten esta causa —y para
+/// `fundamento` es peor, porque su `skip_serializing_if` borra del JSON la evidencia
+/// de que el campo existió—, así que comparten la guarda (D23: el falso negativo
+/// hermano se arregla con el ruidoso). Lo cazó el concilio del 2026-10-12.
+pub fn no_vacio(dato: Option<&str>) -> Option<String> {
+    dato.map(str::trim).filter(|s| !s.is_empty()).map(str::to_string)
+}
+
+/// Recolecta, arma el acta, la firma y **comprueba el sello recién puesto**.
+pub fn sellar(origen: &Path, sk: &TripleSigningKey, datos: &Datos) -> Result<Acta> {
+    let inicio = Utc::now();
+    let recogido = recoleccion::recolectar(origen)?;
+    let fin = Utc::now();
+
+    if recogido.elementos.is_empty() {
+        bail!("{} no contiene ningún elemento: no hay nada que sellar", origen.display());
+    }
+    if !recogido.ilegibles.is_empty() && !datos.admitir_ilegibles {
+        bail!(
+            "no se pudieron leer {} elemento(s): {}. Sellado detenido: un acta que \
+             calla lo que no pudo leer es un acta falsa. Si el material realmente es \
+             ilegible, repite con --admitir-ilegibles y quedará constancia expresa.",
+            recogido.ilegibles.len(),
+            recogido.ilegibles.join("; ")
+        );
+    }
+
+    let mut acta = Acta {
+        formato: FORMATO.to_string(),
+        caso: Caso {
+            referencia: datos.referencia.clone(),
+            descripcion: datos.descripcion.clone(),
+        },
+        perito: Perito {
+            nombre: datos.perito.clone(),
+            identificacion: datos.identificacion.clone(),
+            clave_publica: STANDARD.encode(sk.verifying_key().to_bytes()),
+        },
+        adquisicion: Adquisicion {
+            origen: origen.canonicalize()?.display().to_string(),
+            metodo: datos.metodo.clone(),
+            reloj: Reloj {
+                inicio_utc: inicio.to_rfc3339_opts(SecondsFormat::Secs, true),
+                fin_utc: fin.to_rfc3339_opts(SecondsFormat::Secs, true),
+                desfase_local_utc: Local::now().offset().to_string(),
+                verificacion: no_vacio(datos.reloj.as_deref())
+                    .unwrap_or_else(|| "NO VERIFICADO contra fuente externa de tiempo".to_string()),
+            },
+            herramienta: crate::herramienta(),
+            algoritmos: ALGORITMOS.to_string(),
+            fundamento: no_vacio(datos.fundamento.as_deref()).unwrap_or_else(|| {
+                "NO DECLARADO (el acta no afirma bajo qué título se adquirió el material)"
+                    .to_string()
+            }),
+            // Vacío cuando no se declara: su ausencia es legítima (D20/D21), a
+            // diferencia del `fundamento`. Se omite del JSON y el informe lo
+            // muestra «—».
+            titulo_referencia: no_vacio(datos.titulo_referencia.as_deref()).unwrap_or_default(),
+        },
+        elementos: recogido.elementos,
+        raiz_merkle: String::new(),
+        firma: None,
+        sello_tiempo: None,
+    };
+
+    acta.fijar_raiz()?;
+    let firma = sk.sign(&acta.bytes_canonicos());
+    acta.firma = Some(Firma {
+        algoritmo: ALGORITMOS.to_string(),
+        valor: STANDARD.encode(&firma),
+    });
+
+    // Sello de tiempo, si se pidió. Va DESPUÉS de firmar porque sella la firma.
+    //
+    // Si el perito lo pidió y la autoridad no responde, esto FALLA. No se cae a
+    // un acta sin sello: quien pidió fecha cierta y recibe un acta sin ella no
+    // tiene cómo notarlo hasta que alguien la discuta.
+    if let Some(url) = &datos.autoridad_sello {
+        let firma_bytes = STANDARD.decode(&acta.firma.as_ref().expect("recién firmada").valor)
+            .expect("lo que acabamos de codificar");
+        let hash = crate::sello_tiempo::hash_de(&firma_bytes);
+
+        let mut nonce = [0u8; 16];
+        getrandom::fill(&mut nonce).context("no hay aleatoriedad del sistema para el nonce")?;
+
+        let token = crate::sello_tiempo::solicitar(&hash, url, &nonce)
+            .with_context(|| format!("no se pudo obtener el sello de tiempo de {url}"))?;
+        let datos_sello = crate::sello_tiempo::verificar(&token, &hash)
+            .context("la autoridad devolvió un sello que no corresponde a esta firma")?;
+
+        acta.sello_tiempo = Some(crate::acta::SelloTiempo {
+            autoridad: url.clone(),
+            fecha_utc: datos_sello.fecha_utc,
+            politica: datos_sello.politica,
+            serie: datos_sello.serie,
+            token: STANDARD.encode(&token),
+        });
+    }
+
+    // Comprobar el sello ANTES de entregarlo. Un acta que no se verifica a sí
+    // misma no debe salir de aquí: el sitio donde se descubriría es la audiencia.
+    acta.verificar_sello()?;
+    // Sin anclas: quien EMITE el acta no decide en quién debe confiar quien la
+    // recibe. Lo que sí se exige aquí es que el token venga firmado — si la
+    // autoridad devolvió algo que no acredita nada, el acta no sale.
+    acta.verificar_sello_tiempo(&[])?;
+    Ok(acta)
+}

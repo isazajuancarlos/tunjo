@@ -1,0 +1,98 @@
+# cargo-deny — control de cadena de suministro (lección Atomic Arch, #143).
+# tunjo es la herramienta de peritaje (AGPL) sobre Quipu + guaca. Exige que TODA
+# dependencia venga de una fuente autorizada (crates.io o el git de guaca),
+# prohíbe comodines de versión y controla licencias.
+
+[advisories]
+version = 2
+# La ÚNICA excepción, y va con su prueba (directiva 6: si puede ser código, no va
+# en prosa). Ver `tests/cadena_suministro.rs::la_exencion_de_rsa_sigue_siendo_cierta`,
+# que se pone roja el día que deje de ser verdad lo que aquí se afirma.
+#
+# RUSTSEC-2023-0071 — «Marvin Attack» sobre el crate `rsa` 0.9.
+# Sin parche disponible: «No safe upgrade is available!».
+#
+# POR QUÉ NO NOS APLICA. La vulnerabilidad es una fuga por tiempo durante las
+# operaciones con la CLAVE PRIVADA (descifrado y firma), y lo que se recupera con
+# ella es esa clave privada. Tunjo no tiene ninguna clave privada RSA: usa `rsa`
+# en un solo sitio —`src/firma_cms.rs`— y solo para VERIFICAR la firma de un token
+# de sellado con la clave PÚBLICA de la autoridad, que es pública por definición.
+# No hay secreto que filtrar y no hay operación privada que cronometrar.
+#
+# Y las claves de tunjo no son RSA: el acta se firma en triple con
+# Ed25519 + ML-DSA-87 + SLH-DSA, que es otro camino entero.
+#
+# Esto es una SALVAGUARDA NUEVA —un atajo que evita una comprobación— así que se
+# le exige lo mismo que a cualquier otra: que discrimine. La exención es de UN
+# aviso concreto, no del crate ni de la categoría, y la prueba comprueba la
+# premisa en vez de confiar en que nadie la rompa.
+ignore = ["RUSTSEC-2023-0071"]
+
+[licenses]
+version = 2
+# Allowlist ajustada al árbol real (directiva 23): una licencia nueva = rojo.
+allow = [
+    "MIT",
+    "Apache-2.0",
+    "Apache-2.0 WITH LLVM-exception",
+    "BSD-1-Clause",
+    "BSD-2-Clause",
+    "BSD-3-Clause",
+    "BSL-1.0",
+    "0BSD",
+    "ISC",                  # ring, rustls, rustls-webpki, untrusted (cliente TLS)
+    "CDLA-Permissive-2.0",  # webpki-roots (raíces de confianza TLS)
+    "Unicode-3.0",
+    "Unlicense",
+    "Zlib",
+    # tunjo, quipu y guaca son AGPL (de casa; licencia comercial aparte).
+    "AGPL-3.0-or-later",
+]
+confidence-threshold = 0.8
+
+[bans]
+multiple-versions = "warn"
+wildcards = "deny"
+
+[sources]
+# El corazón anti-Atomic-Arch: fuente inesperada = rojo. La única dep git
+# autorizada es guaca (fijada además por rev en Cargo.toml).
+unknown-registry = "deny"
+unknown-git = "deny"
+# AL ESPEJO, NO A GITHUB (2026-08-11). El protocolo «solo local» movió el origen
+# de verdad a /home/juan/espejos y quitó el remoto de GitHub, pero no tocó los
+# `Cargo.toml`. Eso es historia y explica por qué la URL es un `file://`.
+#
+# **Lo que seguía escrito debajo era FALSO, y se corrige el 2026-08-16**: decía
+# que el rev vive en GitHub como commit huérfano, que «se descarga igual porque
+# GitHub sirve SHA arbitrarios», y que «el día que lo recoja el recolector, esto
+# deja de compilar sin aviso». No puede pasar, por DOS razones independientes:
+# la fuente ya no es GitHub —es el espejo local, que es lo que declara la línea
+# de abajo— y este repositorio construye desde `vendor/`, comprometido en git,
+# con `replace-with = "vendored-sources"` en `.cargo/config.toml`. O sea que la
+# construcción no descarga nada de ninguna parte.
+#
+# Se corrige y no se borra porque el criterio es el mismo que aplica el bloque de
+# quipu: una afirmación falsa en el archivo que declara qué fuentes se aceptan es
+# peor que la excepción que falta — la excepción se ve en rojo, la afirmación no
+# se ve nunca. Lo señaló la revisión de este mismo cambio, que vio el criterio
+# aplicado en guaca y no aquí.
+allow-git = [
+    "file:///home/juan/espejos/guaca.git",
+    # quipu faltaba, y por eso `cargo deny check sources` llevaba ROJO en `main`
+    # —cuatro `source-not-allowed`: quipu, quipu-nucleo, quipu-voprf y padme-frame—.
+    #
+    # **La causa tiene fecha y es UNA sola**: el commit del 2026-08-14 «quipu sale
+    # del ESPEJO, no de crates.io» mudó la fuente de quipu en CINCO repositorios de
+    # una pasada —medico, informes, chasqui, guaca y tunjo— y no tocó `allow-git`
+    # en ninguno. **No fue** el protocolo «solo local» del 08-10 ni la mudanza de
+    # guaca del 08-11: esos dos declararon lo que movían. Fue el barrido que movió
+    # una fuente y dejó su puerta sin declarar — comprobado con `git log -S` sobre
+    # el `Cargo.lock` de los cinco, no deducido.
+    #
+    # Medido el 2026-08-16 comparando `Cargo.lock` contra `deny.toml` en los nueve
+    # repositorios que tienen los dos: fallaban esos cinco, y solo esos cinco.
+    #
+    # Es el MISMO espejo local, no una fuente nueva.
+    "file:///home/juan/espejos/quipu.git",
+]

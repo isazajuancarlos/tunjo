@@ -1,0 +1,402 @@
+// SPDX-FileCopyrightText: 2026 Juan Carlos Isaza
+// SPDX-License-Identifier: AGPL-3.0-or-later
+//! Sello de tiempo de un tercero (RFC 3161).
+//!
+//! # Por qué hace falta
+//!
+//! Sin esto, el acta prueba **orden relativo**, no fecha cierta: la hora la pone
+//! el reloj del perito, y un reloj adelantado produce un acta adelantada sin que
+//! el sello lo delate. Una autoridad de sellado externa es lo que convierte «esto
+//! existía antes que aquello» en «esto existía antes de tal día».
+//!
+//! # Y en Colombia esto no es un servicio informal
+//!
+//! El artículo 161, numeral 5, del Decreto Ley 019 de 2012 enumera entre las
+//! actividades de las entidades de certificación digital «ofrecer o facilitar
+//! los servicios de registro y **estampado cronológico** en la generación,
+//! transmisión y recepción de mensajes de datos». ONAC lo acredita bajo el
+//! criterio CEA-3.0-07, y el anexo del certificado de acreditación cita como
+//! documento normativo del servicio, literalmente, **RFC 3161**.
+//!
+//! Es decir: el protocolo técnicamente correcto y el jurídicamente reconocido
+//! son el mismo. No hay que elegir.
+//!
+//! # Qué se sella: la FIRMA, no el acta
+//!
+//! El sello se pide sobre el hash de la **firma**, no sobre el del acta. Sellar
+//! el acta probaría que su contenido existía en tal fecha, y dejaría abierto que
+//! la firma se hubiera puesto después. Sellando la firma queda probado que la
+//! firma —y con ella todo lo que cubre— ya existía. Es lo que hacen las firmas
+//! avanzadas con marca de tiempo, y por la misma razón.
+//!
+//! Consecuencia: el token va en el acta **fuera** de lo firmado. No podría ser
+//! de otro modo — se obtiene después de firmar—, y por eso `bytes_canonicos`
+//! excluye tanto la firma como el sello.
+//!
+//! # Qué se verifica aquí, y qué no
+//!
+//! Se verifica lo que ata el token a NUESTROS datos: que su `messageImprint`
+//! sea exactamente el hash de la firma del acta, y se extraen la fecha, la
+//! política y el número de serie.
+//!
+//! **Este módulo NO comprueba la firma CMS del token**: eso vive en
+//! [`crate::firma_cms`] desde el 2026-07-30, y sus llamadores lo invocan SIEMPRE
+//! junto con `verificar` (`custodia::estado_sello`, `Acta::verificar_sello_tiempo`,
+//! `custodia::sellar_final`, `sellado`). Hasta esa fecha esta cabecera decía que
+//! la firma no se validaba EN NINGÚN SITIO, y era cierto; dejarla así después
+//! habría sido igual de engañoso al revés, porque es la cabecera que alguien lee
+//! para saber qué garantiza la herramienta.
+//!
+//! Lo que sigue fuera de alcance en todo el programa: validación PKI completa
+//! —revocación (CRL/OCSP), restricciones de nombre, políticas de certificación—.
+//! Para eso, la herramienta estándar, con el token que el acta guarda íntegro:
+//!
+//! ```text
+//! openssl ts -verify -in sello.tsr -data firma.bin -CAfile cadena_tsa.pem
+//! ```
+//!
+//! El acta lo dice expresamente en lugar de insinuar una garantía mayor.
+
+use anyhow::{Context, Result, bail};
+use der::asn1::{GeneralizedTime, Int, ObjectIdentifier, OctetString};
+use der::{Decode, Reader, SliceReader, Tag, Tagged};
+// `Encode` solo lo usa `peticion_der` (construir la petición DER), de la ruta de
+// sellado; en la build verify-only no entra.
+#[cfg(feature = "sellar")]
+use der::Encode;
+use sha2::{Digest, Sha256};
+
+/// OID de SHA-256 (2.16.840.1.101.3.4.2.1).
+const OID_SHA256: ObjectIdentifier = ObjectIdentifier::new_unwrap("2.16.840.1.101.3.4.2.1");
+
+/// Tipo de contenido `id-ct-TSTInfo` (1.2.840.113549.1.9.16.1.4).
+const OID_TSTINFO: ObjectIdentifier = ObjectIdentifier::new_unwrap("1.2.840.113549.1.9.16.1.4");
+
+/// Lo que un token acredita, ya legible.
+#[derive(Debug, Clone, PartialEq)]
+pub struct DatosSello {
+    /// Instante que certifica la autoridad, en UTC.
+    pub fecha_utc: String,
+    /// Política de sellado bajo la que se emitió.
+    pub politica: String,
+    /// Número de serie del token, único para esa autoridad.
+    pub serie: String,
+}
+
+// --------------------------------------------------------------------- pedir
+
+#[derive(der::Sequence)]
+struct AlgoritmoHash {
+    oid: ObjectIdentifier,
+    parametros: Option<der::asn1::Null>,
+}
+
+#[derive(der::Sequence)]
+struct HuellaMensaje {
+    algoritmo: AlgoritmoHash,
+    huella: OctetString,
+}
+
+#[cfg(feature = "sellar")]
+#[derive(der::Sequence)]
+struct PeticionSello {
+    version: u8,
+    huella: HuellaMensaje,
+    nonce: Int,
+    /// Se pide el certificado de la autoridad DENTRO del token. Sin él, quien
+    /// quiera validarlo tendría que salir a buscarlo por su cuenta, y en diez
+    /// años puede no estar. Un sello que depende de un servidor vivo para
+    /// verificarse no sirve para lo que se pide aquí.
+    solicitar_certificado: bool,
+}
+
+#[cfg(feature = "sellar")]
+fn peticion_der(hash: &[u8; 32], nonce: &[u8; 16]) -> Result<Vec<u8>> {
+    let p = PeticionSello {
+        version: 1,
+        huella: HuellaMensaje {
+            algoritmo: AlgoritmoHash { oid: OID_SHA256, parametros: Some(der::asn1::Null) },
+            huella: OctetString::new(hash.as_slice())?,
+        },
+        nonce: Int::new(nonce.as_slice())?,
+        solicitar_certificado: true,
+    };
+    Ok(p.to_der()?)
+}
+
+/// Pide un sello a la autoridad y devuelve el token tal cual, en DER.
+///
+/// El nonce lo elige quien llama y **se comprueba en la respuesta**: es lo que
+/// impide que la autoridad —o quien se interponga— entregue un token viejo como
+/// si fuera nuevo. RFC 3161 §2.4.2 obliga a devolverlo cuando la petición lo
+/// lleva, así que su ausencia también es un rechazo: no se puede comprobar un
+/// control y dar por bueno que no hacía falta.
+///
+/// Hasta el 2026-07-30 este párrafo decía que el nonce se comprobaba y no se
+/// comprobaba en ningún sitio — el parser saltaba la cola opcional del `TSTInfo`
+/// donde viaja. Lo cazó la primera revisión de seguridad.
+#[cfg(feature = "sellar")]
+pub fn solicitar(hash_firma: &[u8; 32], url: &str, nonce: &[u8; 16]) -> Result<Vec<u8>> {
+    let peticion = peticion_der(hash_firma, nonce)?;
+
+    let respuesta = ureq::post(url)
+        .header("Content-Type", "application/timestamp-query")
+        .send(&peticion[..])
+        .with_context(|| format!("la autoridad de sellado {url} no respondió"))?;
+
+    let cuerpo = respuesta
+        .into_body()
+        .read_to_vec()
+        .context("no se pudo leer la respuesta de la autoridad de sellado")?;
+
+    let token = extraer_token(&cuerpo)?;
+    comprobar_nonce(&token, nonce)?;
+    Ok(token)
+}
+
+/// Sin la capacidad de sellado, PEDIR un token no existe —y con ello no se enlaza
+/// `ureq`/`rustls`/`ring`, que no compilan a `wasm32` y que un verificador no
+/// necesita—. La firma se conserva para que los llamantes (que solo corren bajo
+/// `sellar`) compilen igual en la build verify-only; si se invocara, falla ruidoso.
+#[cfg(not(feature = "sellar"))]
+pub fn solicitar(_hash_firma: &[u8; 32], _url: &str, _nonce: &[u8; 16]) -> Result<Vec<u8>> {
+    anyhow::bail!("solicitar un sello de tiempo requiere la capacidad de sellado (feature `sellar`)")
+}
+
+/// Comprueba que el token responde a ESTA petición y no a otra anterior.
+#[cfg(feature = "sellar")]
+fn comprobar_nonce(token_der: &[u8], enviado: &[u8; 16]) -> Result<()> {
+    let info = extraer_tstinfo(token_der)?;
+    let Some(recibido) = info.nonce else {
+        bail!(
+            "la autoridad no devolvió el nonce que se le envió. RFC 3161 lo exige \
+             cuando la petición lo lleva, y sin él no se puede distinguir un sello \
+             nuevo de uno viejo reenviado"
+        );
+    };
+    // Se compara contra la forma DER canónica del entero, que es la que viajó en
+    // la petición: comparar los 16 bytes crudos fallaría cuando DER añade el 0x00
+    // que impide leer el valor como negativo.
+    let esperado = Int::new(enviado.as_slice())?;
+    if recibido != esperado.as_bytes() {
+        bail!(
+            "el nonce del sello no es el que se envió: la respuesta no corresponde a \
+             esta petición"
+        );
+    }
+    Ok(())
+}
+
+// -------------------------------------------------------------------- parsear
+
+/// Saca el token de una `TimeStampResp`, comprobando antes el estado.
+///
+/// `PKIStatus`: 0 = granted, 1 = grantedWithMods. Cualquier otro es un rechazo
+/// y se trata como error: un acta con un sello no concedido sería un acta que
+/// aparenta tener fecha cierta y no la tiene.
+#[cfg(feature = "sellar")]
+fn extraer_token(respuesta: &[u8]) -> Result<Vec<u8>> {
+    let mut lector = SliceReader::new(respuesta)
+        .context("la respuesta de la autoridad no es DER válido")?;
+
+    let token = lector.sequence(|r| {
+        // PKIStatusInfo ::= SEQUENCE { status INTEGER, ... }
+        let estado: u32 = r.sequence(|s| {
+            let estado: u32 = s.decode()?;
+            // statusString y failInfo son opcionales y aquí no se necesitan.
+            while !s.is_finished() {
+                let _: der::AnyRef = s.decode()?;
+            }
+            Ok(estado)
+        })?;
+        if estado > 1 {
+            // Se propaga como error de decodificación y se traduce fuera, para
+            // no perder el número de estado en el camino.
+            return Err(der::Error::new(
+                der::ErrorKind::Value { tag: Tag::Integer },
+                der::Length::ZERO,
+            ));
+        }
+        if r.is_finished() {
+            return Err(der::Error::new(
+                der::ErrorKind::Incomplete {
+                    expected_len: der::Length::ONE,
+                    actual_len: der::Length::ZERO,
+                },
+                der::Length::ZERO,
+            ));
+        }
+        let token: der::Any = r.decode()?;
+        token.to_der()
+    });
+
+    match token {
+        Ok(bytes) => Ok(bytes),
+        Err(e) => bail!(
+            "la autoridad de sellado no concedió el sello o su respuesta no se pudo \
+             interpretar ({e}). El acta NO se firma con una fecha que no está acreditada."
+        ),
+    }
+}
+
+struct InfoSello {
+    politica: ObjectIdentifier,
+    huella: HuellaMensaje,
+    serie: Int,
+    fecha: GeneralizedTime,
+    /// Nonce que la autoridad devuelve, si lo devuelve. RFC 3161 §2.4.2 lo hace
+    /// obligatorio en la respuesta cuando la petición lo llevaba. Lo LEE
+    /// `comprobar_nonce`, que es de la ruta de sellado; en la build verify-only ese
+    /// lector no existe, pero el campo se queda —es parte de la secuencia DER que el
+    /// parser debe recorrer— con `allow(dead_code)` solo ahí.
+    #[cfg_attr(not(feature = "sellar"), allow(dead_code))]
+    nonce: Option<Vec<u8>>,
+}
+
+/// Decodifica un `TSTInfo` quedándose con los cinco primeros campos.
+///
+/// No se deriva `Sequence` a propósito: el `TSTInfo` termina con cinco campos
+/// opcionales —accuracy, ordering, nonce, tsa, extensions— que cada autoridad
+/// rellena a su manera, y un derive exige consumir el mensaje entero. Con
+/// DigiCert sobraban 18 bytes y con FreeTSA 300: modelarlos todos sería añadir
+/// superficie de error para leer lo que no se usa. Se leen los que importan y
+/// la cola se consume sin interpretarla.
+fn parsear_tstinfo(bytes: &[u8]) -> Result<InfoSello> {
+    let mut lector = SliceReader::new(bytes).context("el TSTInfo no es DER válido")?;
+    let info = lector
+        .sequence(|r| {
+            let _version: u8 = r.decode()?;
+            let politica: ObjectIdentifier = r.decode()?;
+            let huella: HuellaMensaje = r.decode()?;
+            let serie: Int = r.decode()?;
+            let fecha: GeneralizedTime = r.decode()?;
+            // La cola opcional va en este orden: accuracy (SEQUENCE), ordering
+            // (BOOLEAN), nonce (INTEGER), tsa ([0]), extensions ([1]). El primer
+            // INTEGER de la cola es, por tanto, el nonce — no hace falta modelar
+            // los demás para encontrarlo, y seguimos sin interpretar lo que no se
+            // usa.
+            let mut nonce = None;
+            while !r.is_finished() {
+                let elemento: der::AnyRef = r.decode()?;
+                if nonce.is_none() && elemento.tag() == Tag::Integer {
+                    nonce = Some(elemento.value().to_vec());
+                }
+            }
+            Ok(InfoSello { politica, huella, serie, fecha, nonce })
+        })
+        .context("el TSTInfo del sello no se pudo leer")?;
+    Ok(info)
+}
+
+/// Extrae el `TSTInfo` del token y comprueba que sella el hash esperado.
+///
+/// Devuelve error si la huella no corresponde: un token válido sobre OTRO dato
+/// no acredita nada sobre este acta, y confundirlos sería el fallo más grave
+/// posible aquí.
+pub fn verificar(token_der: &[u8], hash_esperado: &[u8; 32]) -> Result<DatosSello> {
+    let info = extraer_tstinfo(token_der)?;
+
+    if info.huella.algoritmo.oid != OID_SHA256 {
+        bail!(
+            "el sello usa un algoritmo de huella distinto de SHA-256 ({}); no se puede \
+             contrastar con lo que firmamos",
+            info.huella.algoritmo.oid
+        );
+    }
+    if info.huella.huella.as_bytes() != hash_esperado.as_slice() {
+        bail!(
+            "el sello de tiempo NO corresponde a la firma de esta acta: sella otra cosa"
+        );
+    }
+
+    Ok(DatosSello {
+        // `GeneralizedTime` no se imprime solo; se pasa por `DateTime`, que da
+        // la forma con «Z» al final y no deja dudas de que es UTC.
+        fecha_utc: info.fecha.to_date_time().to_string(),
+        politica: info.politica.to_string(),
+        serie: info
+            .serie
+            .as_bytes()
+            .iter()
+            .map(|b| format!("{b:02x}"))
+            .collect(),
+    })
+}
+
+fn extraer_tstinfo(token_der: &[u8]) -> Result<InfoSello> {
+    use cms::content_info::ContentInfo;
+    use cms::signed_data::SignedData;
+
+    let ci = ContentInfo::from_der(token_der)
+        .context("el token de sello no es un ContentInfo válido")?;
+    let firmado: SignedData = ci
+        .content
+        .decode_as()
+        .context("el token de sello no contiene un SignedData")?;
+
+    let encap = &firmado.encap_content_info;
+    if encap.econtent_type != OID_TSTINFO {
+        bail!(
+            "el token no encapsula un TSTInfo sino {} — no es un sello de tiempo RFC 3161",
+            encap.econtent_type
+        );
+    }
+    let contenido = encap
+        .econtent
+        .as_ref()
+        .context("el token de sello viene sin contenido")?;
+
+    // El eContent es un OCTET STRING cuyo interior es el TSTInfo en DER.
+    let octetos: OctetString = contenido
+        .decode_as()
+        .context("el contenido del token no es un OCTET STRING")?;
+    parsear_tstinfo(octetos.as_bytes())
+}
+
+/// Hash de la firma del acta, que es lo que se manda a sellar.
+pub fn hash_de(datos: &[u8]) -> [u8; 32] {
+    Sha256::digest(datos).into()
+}
+
+#[cfg(test)]
+mod pruebas {
+    use super::*;
+
+    #[cfg(feature = "sellar")]
+    #[test]
+    fn la_peticion_es_der_bien_formado_y_lleva_el_hash() {
+        let hash = [0xABu8; 32];
+        let nonce = [7u8; 16];
+        let der = peticion_der(&hash, &nonce).unwrap();
+        assert_eq!(der[0], 0x30, "una TimeStampReq es un SEQUENCE");
+        assert!(
+            der.windows(32).any(|v| v == hash),
+            "el hash que se manda sellar tiene que ir dentro de la petición"
+        );
+    }
+
+    #[cfg(feature = "sellar")]
+    #[test]
+    fn una_respuesta_con_estado_de_rechazo_no_produce_token() {
+        // TimeStampResp con status=2 (rejection) y sin token.
+        let respuesta = [0x30, 0x05, 0x30, 0x03, 0x02, 0x01, 0x02];
+        let e = extraer_token(&respuesta).unwrap_err();
+        assert!(e.to_string().contains("no concedió"), "{e}");
+    }
+
+    #[cfg(feature = "sellar")]
+    #[test]
+    fn una_respuesta_concedida_pero_sin_token_tambien_falla() {
+        // status=0 (granted) y nada más: no hay nada que guardar.
+        let respuesta = [0x30, 0x05, 0x30, 0x03, 0x02, 0x01, 0x00];
+        assert!(extraer_token(&respuesta).is_err());
+    }
+
+    #[test]
+    fn la_basura_no_se_interpreta_como_sello() {
+        #[cfg(feature = "sellar")]
+        assert!(extraer_token(b"esto no es DER").is_err());
+        // La verificación rechaza basura en AMBAS builds (no depende de `sellar`).
+        assert!(verificar(b"esto tampoco", &[0u8; 32]).is_err());
+    }
+}

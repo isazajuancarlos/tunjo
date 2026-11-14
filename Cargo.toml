@@ -1,0 +1,153 @@
+# SPDX-FileCopyrightText: 2026 Juan Carlos Isaza
+# SPDX-License-Identifier: AGPL-3.0-or-later
+
+# `verificador-wasm` es miembro del workspace SOLO para compartir este Cargo.lock y
+# el `vendor/` (sus deps —familia wasm-bindgen, getrandom web— ya están vendorizadas,
+# entraron transitivas). `default-members = ["."]` deja fuera el crate wasm de los
+# builds/tests nativos por defecto (es cdylib para wasm32, no se compila en nativo);
+# se construye aparte con `cargo build` DESDE `verificador-wasm/` (su `.cargo/config`
+# fija el target wasm32 y el cfg de getrandom).
+[workspace]
+members = ["verificador-wasm"]
+default-members = ["."]
+
+[package]
+name = "tunjo"
+version = "0.1.0"
+edition = "2024"
+description = "Sellado criptográfico y acta de cadena de custodia para evidencia digital, con firma post-cuántica."
+authors = ["Juan Carlos Isaza <isazajuancarlos@gmail.com>"]
+license = "AGPL-3.0-or-later"
+# No se publica en crates.io: depende de guaca por git (crates.io no admite deps
+# git) y es una app de peritaje, no una librería. Explícito para que un
+# `cargo publish` accidental falle y para que cargo-deny lo trate como privado.
+publish = false
+keywords = ["forensics", "chain-of-custody", "post-quantum", "evidence", "peritaje"]
+categories = ["command-line-utilities", "cryptography"]
+readme = "README.md"
+repository = "https://github.com/isazajuancarlos/tunjo"
+homepage = "https://github.com/isazajuancarlos/tunjo"
+
+# Puerta de buenas prácticas por DEFECTO (estándar de nacimiento, 2026-08-22).
+# Solo `deny` porque el CI corre `-D warnings`, que escala todo `warn` a error:
+# aquí solo entra lo que se está dispuesto a BLOQUEAR.
+[lints.clippy]
+redundant_clone = "deny"    # clon innecesario (rendimiento)
+needless_collect = "deny"   # `.collect()` para volver a iterar (rendimiento)
+
+[features]
+# `sellar` (por defecto) trae las capacidades de ESCRITURA: crear clave, sellar y
+# mutar la cadena de custodia. El VERIFICADOR PÚBLICO se compila
+# `--no-default-features`: sólo `verificar`, `acta` y `custodia verificar` —lo que
+# un tercero (juez, contraparte) necesita, sin poder sellar ni pagar—. Es el mismo
+# código, no una copia: los tres comandos de verificación no pueden divergir
+# (invariante 3).
+default = ["sellar"]
+sellar = ["dep:ureq"]
+
+[dependencies]
+# La firma triple-híbrida (Ed25519 + ML-DSA-87 + SLH-DSA) y el contenedor
+# cifrado con el que se protege la clave del perito vienen de Quipu.
+#
+# Se toma del registro, no por `path`: un repositorio que solo compila si
+# tienes un checkout hermano no lo puede construir quien lo clona, y el
+# verificador tiene que ser ejecutable por cualquiera. Para desarrollar contra
+# un Quipu local, añade en un `.cargo/config.toml` sin versionar:
+#     [patch.crates-io]
+#     quipu = { path = "../quipu" }
+quipu = { version = "0.15", features = ["slh"] }
+# La cadena de custodia usa el encadenamiento de guaca, firmado en TRIPLE (el
+# firmante lo pone tunjo, que ya tiene SLH-DSA). guaca aporta solo la cadena.
+# Fijada por commit inmutable, NO por el tag: un tag es mutable, y moverlo a un
+# commit malicioso nos lo traería al construir (lección del ataque Atomic Arch a
+# AUR). El Cargo.lock ya lo fijaba; esto lo hace explícito.
+#
+# OJO: este rev NO es el tag v0.4.0. El tag apunta a d786d1c3, nueve commits
+# atrás, y ESE commit pide quipu = "0.10" — alinearlo al tag desharía el salto a
+# la 0.11 en silencio y metería dos quipu en el lock. Ver CLAUDE.md.
+# 2026-08-12: sube a `v0.7.0` (`f769b12`). tunjo solo usa `auditoria` —censo:
+# 3 llamadas, ninguna otra— así que de la 0.7 no consume nada nuevo. Se sube por
+# el invariante «un solo árbol de guaca en todo el universo», y porque la 0.7 le
+# QUITA cuatro crates: `dosfactores` pasó a estar detrás de una feature, y con
+# ella se van `totp-rs`, `sha1`, `base32` y `constant_time_eq`, que entraron en
+# el árbol de tunjo por una regla que no llama. Aquí NO se pide ninguna feature,
+# a propósito.
+guaca = { git = "file:///home/juan/espejos/guaca.git", rev = "d501eb30b5c948ce305051fc45db7ff72f8cff07", version = "0.7" }
+sha2 = "0.11"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+clap = { version = "4", features = ["derive"] }
+chrono = { version = "0.4", features = ["clock"] }
+base64 = "0.23"
+walkdir = "2"
+anyhow = "1"
+rpassword = "7"
+
+# Sello de tiempo RFC 3161. `cms` fija `der` 0.7 y `const-oid` 0.9: se pinean
+# para no acabar con dos versiones incompatibles del mismo ASN.1 y tipos que no
+# se hablan entre sí.
+cms = "0.2"
+der = { version = "0.7", features = ["oid", "std"] }
+const-oid = "0.9"
+# Verificación de la firma CMS del token (#196). `x509-cert` y `spki` ya venían
+# por `cms`; se declaran explícitos porque ahora los usa código nuestro, y una
+# dependencia que se usa a la cara no se hereda en silencio.
+x509-cert = "0.2"
+spki = "0.7"
+rsa = "0.9"
+p256 = { version = "0.13", features = ["ecdsa"] }
+p384 = { version = "0.13", features = ["ecdsa"] }
+# `rsa` y `p256` hablan `digest` 0.10, no el `sha2` 0.11 del resto de tunjo. Las
+# dos versiones ya estaban en el árbol; se declara la 0.10 con nombre propio para
+# que su uso sea una decisión visible y no una coincidencia de resolución.
+# La feature `oid` es obligatoria, no cosmética: `rsa` construye la clave de
+# verificación PKCS#1 v1.5 a partir del OID asociado a la huella.
+sha2_010 = { package = "sha2", version = "0.10", features = ["oid"] }
+ureq = { version = "3", optional = true }
+# El nonce del sello viene del RNG del sistema: es lo que impide que una
+# autoridad reutilice un token viejo como si fuera nuevo.
+getrandom = { version = "0.4", features = ["std"] }
+
+[dev-dependencies]
+tempfile = "3"
+
+# Las DEPENDENCIAS optimizadas incluso en depuración; el crate propio no.
+#
+# `generate_triple_keypair` incluye SLH-DSA, que sin optimizar es órdenes de
+# magnitud más lento. Medido el 2026-07-26: `sellado_concurrente_sin_interbloqueo`
+# —8 hebras generando claves a la vez— tardaba MÁS DE 120 s en `dev` y 12 s en
+# `release`. Reventaba su propio temporizador y acusaba de «interbloqueo» a algo
+# que solo era lentitud, con la suite entera en 494 s.
+#
+# Subir el temporizador habría sido tapar el síntoma. Esto quita la causa y deja
+# intacta la depuración del código de Tunjo, que es el que se lee con el
+# depurador.
+[profile.dev.package."*"]
+opt-level = 3
+
+# ═══════════════════════════════════════════════════════════════════════════
+# QUIPU SALE DEL ESPEJO LOCAL, NO DE CRATES.IO
+# ═══════════════════════════════════════════════════════════════════════════
+#
+# Medido el 2026-08-14: este repositorio compilaba **quipu 0.11.0 desde
+# crates.io**, y esa versión está **YANKED** — la retiramos nosotros el
+# 2026-08-10 con el protocolo «solo local», junto con otras 23.
+#
+# No estaba roto: estaba DESCONECTADO. Funcionaba porque el `Cargo.lock` está
+# commiteado y cargo tolera un yank que ya está bloqueado. La consecuencia real
+# no era el yank sino la DERIVA: el árbol de quipu iba por 0.11.1 más todo lo
+# posterior mientras aquí se compilaba la 0.11.0, así que nueve días de cambios
+# en la librería criptográfica no llegaban.
+#
+# Y para un repositorio NUEVO ni siquiera funcionaba: `cargo vendor` fallaba con
+# «version 0.11.0 is yanked», que es exactamente el fallo que abrió este trabajo.
+#
+# `[patch]` SOLO lo honra el paquete RAÍZ del workspace, no una dependencia, así
+# que va aquí y no en guaca — aunque guaca declare el mismo requisito y arrastre
+# a sus consumidores al registro.
+#
+# El rev es el de `estable`, que por definición es lo publicado y no puede estar
+# roja. No se toma «el último por ser el último» (directiva 35): se toma la rama
+# que el propio repositorio designa como estable.
+[patch.crates-io]
+quipu = { git = "file:///home/juan/espejos/quipu.git", rev = "cd30c1b0183ab7c68a8122ca4f269ae04e7e2d27" }

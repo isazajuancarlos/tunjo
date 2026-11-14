@@ -1,0 +1,6 @@
+# getrandom 0.4 en wasm32-unknown-unknown exige este cfg además de la feature
+# `wasm_js` (usa crypto.getRandomValues del navegador). Solo aplica a builds desde
+# este crate; no afecta a tunjo.
+[build]
+target = "wasm32-unknown-unknown"
+rustflags = ['--cfg', 'getrandom_backend="wasm_js"']

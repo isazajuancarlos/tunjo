@@ -1,0 +1,15 @@
+# Supresiones de advisories de cargo-deny, con caducidad y rastreo.
+#
+# Lo vigila `guardia-supresiones` (/mnt/data/guardia-supresiones), que exige:
+#   1. biyección con deny.toml[advisories].ignore (toda supresión justificada),
+#   2. que ninguna esté CADUCADA (pasada su `hasta`), y
+#   3. que ninguna esté INERTE (que siga casando una advisory viva hoy).
+#
+# La justificación larga y la prueba de la premisa viven en deny.toml y en
+# tests/cadena_suministro.rs; aquí va el porqué en una línea + la fecha de re-juicio.
+
+[[supresion]]
+id = "RUSTSEC-2023-0071"
+motivo = "tunjo usa `rsa` solo para VERIFICAR firmas con la clave PÚBLICA de la autoridad (src/firma_cms.rs); no hay clave privada RSA que filtrar por el timing del Marvin Attack."
+hasta = "2026-12-31"
+rastreo = "tests/cadena_suministro.rs::la_exencion_de_rsa_sigue_siendo_cierta · upstream RustCrypto/RSA#626 (sin parche)"

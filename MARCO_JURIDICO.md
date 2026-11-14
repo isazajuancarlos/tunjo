@@ -1,0 +1,659 @@
+<!--
+SPDX-FileCopyrightText: 2026 Juan Carlos Isaza
+SPDX-License-Identifier: AGPL-3.0-or-later
+-->
+# Marco jurídico del peritaje informático en Colombia
+
+Investigación previa al diseño de Tunjo. Cada afirmación va con su fuente
+consultada; lo que no pude contrastar contra el texto oficial queda marcado como
+**pendiente de verificar** en vez de darse por bueno.
+
+Fecha de consulta: **26 de julio de 2026**. Las fuentes que quedaron abiertas en
+la primera vuelta se verificaron el mismo día; lo que sigue sin comprobar está
+marcado y es solo lo que no pude leer en su texto original.
+
+---
+
+## 1. La pregunta que decide el diseño
+
+Un dictamen informático no se pierde por no identificar al atacante. Se pierde
+antes: cuando la contraparte pregunta *cómo sabemos que esos archivos son los
+que el perito recibió y no los que editó después*. Todo lo que sigue gira
+alrededor de eso.
+
+> **Pero esa pregunta no siempre es legítima, y conviene saberlo antes de
+> ofrecer una respuesta.** La ley presume la autenticidad de los documentos que
+> se aportan a un proceso, y la Corte Suprema anuló en **STC3964-2023** un
+> rechazo de demanda fundado precisamente en exigirle a un litigante la
+> «trazabilidad» de un poder enviado por correo: es una formalidad innecesaria de
+> las que el artículo 11 del CGP prohíbe. Aportar prueba criptográfica donde la
+> ley no la pide no refuerza un dictamen —sugiere que la presunción no bastaba— y
+> empuja al juez a exigir lo que tiene vedado exigir.
+>
+> El sello sirve donde la presunción **no alcanza**: documento tachado o
+> desconocido, discusión sobre **integridad** y no sobre autoría, masa de datos
+> que nadie aportó como propia, y materia penal. El detalle, en §6.1.
+
+La Ley 527 de 1999 dice, en su artículo 11, qué debe valorar el juez ante un
+mensaje de datos:
+
+> «la confiabilidad en la forma en la que se haya generado, archivado o
+> comunicado el mensaje, la confiabilidad en la forma en que se haya conservado
+> la integridad de la información, la forma en la que se identifique a su
+> iniciador y cualquier otro factor pertinente».
+
+Son tres extremos, y **los tres son documentales, no interpretativos**. Una
+herramienta puede acreditarlos. Ninguna herramienta puede acreditar quién entró
+al sistema. Por eso Tunjo hace lo primero y se abstiene de lo segundo.
+
+El artículo 9 de la misma ley define la integridad de forma que se puede medir:
+la información es íntegra si «ha permanecido completa e inalterada, salvo la
+adición de algún endoso o de algún cambio que sea inherente al proceso de
+comunicación, archivo o presentación». Un hash contesta exactamente esa
+pregunta.
+
+**Fuentes:** [Ley 527 de 1999 — Gestor Normativo, Función
+Pública](https://www.funcionpublica.gov.co/eva/gestornormativo/norma.php?i=4276);
+[texto en OEA](http://www.oas.org/juridico/spanish/cyb_col_Ley_527_de_1999.pdf);
+[Sentencia C-662 de 2000](https://www.corteconstitucional.gov.co/relatoria/2000/c-662-00.htm).
+
+---
+
+## 2. Régimen probatorio civil
+
+### 2.1 Valoración de mensajes de datos — CGP art. 247
+
+Serán valorados como mensajes de datos los documentos aportados **en el mismo
+formato en que fueron generados, enviados o recibidos**, o en uno que lo
+reproduzca con fidelidad. Las impresiones en papel se valoran conforme a las
+reglas de los documentos en papel.
+
+**Consecuencia de diseño:** se sella el archivo original, no un PDF de él ni una
+captura de pantalla. Un pantallazo de un WhatsApp es un documento en papel
+electrónico: pierde metadatos y baja de categoría probatoria. Tunjo trabaja sobre
+los archivos tal como están.
+
+### 2.2 Autenticidad y su presunción — CGP art. 244
+
+Un documento es auténtico cuando existe certeza sobre quién lo elaboró,
+manuscribió, firmó, o sobre la persona a quien se atribuye. Los documentos
+públicos y los privados —incluidos los mensajes de datos— **se presumen
+auténticos mientras no sean tachados o desconocidos**.
+
+**Consecuencia de diseño:** el sello no crea la autenticidad, que ya se presume.
+Sirve para lo que ocurre *después* de la tacha: cuando la contraparte desconoce
+el documento, el acta es lo que sostiene la carga.
+
+### 2.3 El dictamen — CGP art. 226
+
+Procede para verificar hechos que requieran conocimientos científicos, técnicos
+o artísticos. No es admisible sobre puntos de derecho. Cada sujeto procesal
+presenta un solo dictamen por materia, rendido por un perito, quien declara bajo
+juramento —prestado con la firma— que su opinión es **independiente** y responde
+a su real convicción profesional.
+
+El dictamen debe ser **claro, preciso, exhaustivo y detallado**, explicar los
+exámenes, métodos, experimentos e investigaciones efectuados, y acompañarse de
+los documentos que lo fundamentan y de los que acreditan la idoneidad del perito.
+Entre las exigencias enumeradas están: identidad del perito y de quienes
+participaron, datos de localización, profesión y experiencia, publicaciones de
+los últimos 10 años, casos en que ha sido designado en los últimos 4, causales de
+impedimento, si el método empleado difiere del que usó en dictámenes anteriores o
+del usual en su profesión, y la lista de documentos e información utilizados.
+
+**Consecuencia de diseño:** el acta que produce Tunjo es el soporte metodológico
+del dictamen — método, herramienta, algoritmos, fechas, lista de material—, no
+el dictamen. Los datos del perito van en el acta porque el artículo los exige.
+
+**Fuentes:** [CGP art. 226](https://leyes.co/codigo_general_del_proceso/226.htm),
+[art. 244](https://leyes.co/codigo_general_del_proceso/244.htm),
+[art. 247](https://leyes.co/codigo_general_del_proceso/247.htm).
+
+---
+
+## 2.4 La adquisición: cómo entra lícitamente lo que se sella
+
+Tunjo acredita **desde** el instante de la adquisición (§9.2): sella los bytes
+que se le dan y jamás prueba lo que pasó antes. Esta sección es sobre el paso que
+queda **fuera** de la herramienta y decide su valor — cómo se llega a esos bytes
+sin que la prueba nazca viciada —, porque es la pregunta que más se lleva por
+delante un peritaje y la que el marco no cubría.
+
+**El punto de partida es el art. 164 del CGP: la prueba obtenida con violación
+del debido proceso es NULA DE PLENO DERECHO.** La licitud de la adquisición no es
+una formalidad: es condición de validez. Un acta impecable sobre material
+obtenido ilícitamente sella fielmente una prueba nula.
+
+**Las vías por las que el CGP permite obtener lo que está en poder de otro**, de
+la más simple a la más fuerte:
+
+- **Entrega voluntaria del titular.** Lo ordinario: el titular del dato —el
+  cliente— entrega su propio dispositivo o cuenta. El consentimiento del titular
+  es el título. Sobre datos de un tercero, a falta de su consentimiento **y** de
+  alguno de los títulos de abajo (exhibición, prueba por informe, orden judicial),
+  no hay adquisición lícita que valga — la Ley 1581 (art. 10) exceptúa del
+  consentimiento justamente esos títulos legales, no su ausencia.
+- **Prueba extraprocesal (arts. 174 y 183-190)** — la vía que habilita al perito
+  a fijar la prueba **antes del proceso**, clave frente a material volátil (un
+  chat que se borra, un posteo que se edita): **exhibición anticipada** de
+  documentos, libros y cosas de la presunta contraparte o de terceros (186);
+  **inspección judicial y peritación extraprocesal**, con o sin perito (189);
+  **declaración sobre documentos**, cuyo reconocimiento hace presumir cierto el
+  contenido (185); testimonio anticipado, incluso ante notario (188).
+- **En curso del proceso:** **exhibición** de documentos/cosas en poder de otra
+  parte o tercero (265-268) —no exhibir se vuelve indicio en contra o se tienen
+  por ciertos los hechos—; **prueba por informe** a entidades «o a cualquier
+  persona» bajo juramento (275), que es la vía formal hacia una plataforma; e
+  **inspección judicial (236), que es SUBSIDIARIA**: solo procede cuando no se
+  puede verificar por videograbación, fotografías, documentos **o dictamen
+  pericial**. Es decir, **el CGP prefiere el dictamen pericial a la inspección
+  del juez** — exactamente el lugar donde opera Tunjo.
+- **Terceros y plataformas en el extranjero:** informe (275) y asistencia
+  judicial por el **Convenio de Budapest** (ratificado por Colombia). Lento, pero
+  es la vía fuerte cuando el dato vive en el servidor de una red social.
+
+**Consecuencia de diseño, y es el gancho con la herramienta:** el acta debe
+declarar no solo el **método técnico** de la adquisición (copia lógica,
+bloqueador de escritura…), sino el **fundamento** bajo el que el material llegó a
+manos del perito —entrega voluntaria del titular, inspección extraprocesal del
+art. 189, exhibición del 186, orden judicial con su radicado—. Sin ese dato el
+acta no puede hablar a la licitud del art. 164, y la licitud es lo primero que
+ataca la contraparte. El campo `adquisicion.fundamento` del acta existe para
+eso: no concluye que la adquisición fue lícita —eso lo defiende el perito—, pero
+**deja escrito bajo qué título dice haberla hecho**, que es lo que permite
+defenderla.
+
+**El límite honesto, que no cambia:** la captura prueba «esto existía en T0 tal
+como lo capturé», nunca «esto es verdadero» ni «existió antes». Un chat pudo
+editarse en el teléfono antes de llegar al perito; un posteo pudo publicarse y
+borrarse. Es el mismo §9.2 aplicado a la adquisición.
+
+**La secuencia concreta para WhatsApp y redes sociales** —cómo adquirir
+preservando metadatos (base SQLite y su clave, captura WARC, aislamiento del
+dispositivo) antes de apuntar Tunjo a los archivos— vive en la guía de operador,
+`conocimiento/peritaje/GUIA-OPERADOR.md`.
+
+**Fuentes:** CGP arts. [164](https://leyes.co/codigo_general_del_proceso/164.htm),
+[183](https://leyes.co/codigo_general_del_proceso/183.htm)–[190](https://leyes.co/codigo_general_del_proceso/190.htm),
+[236](https://leyes.co/codigo_general_del_proceso/236.htm),
+[265](https://leyes.co/codigo_general_del_proceso/265.htm)–268,
+[275](https://leyes.co/codigo_general_del_proceso/275.htm). Análisis completo del
+CGP en `/mnt/data/conocimiento/juridico/codigo-general-del-proceso.md`.
+
+---
+
+## 3. Cadena de custodia — CPP art. 254
+
+Texto literal del artículo 254 de la Ley 906 de 2004:
+
+> «Con el fin de demostrar la autenticidad de los elementos materiales
+> probatorios y evidencia física, la cadena de custodia se aplicará teniendo en
+> cuenta los siguientes factores: identidad, estado original, condiciones de
+> recolección, preservación, embalaje y envío; lugares y fechas de permanencia y
+> los cambios que cada custodio haya realizado.»
+
+Se registra el nombre e identificación de **todas** las personas que hayan tenido
+contacto con los elementos. La cadena inicia donde se descubre o encuentra la
+evidencia y termina por orden de autoridad competente.
+
+**Consecuencia de diseño:** el acta traduce cada factor a un campo. `identidad` →
+ruta y hash; `estado original` → raíz de Merkle; `condiciones de recolección` →
+método declarado; `fechas` → registro horario en UTC con el desfase local. Lo que
+un formato de papel resuelve con firmas sucesivas, aquí lo resuelve la firma
+criptográfica sobre el conjunto.
+
+### 3.1 A quién obliga — art. 255
+
+La responsabilidad no es solo de los servidores públicos:
+
+> «Los particulares que por razón de su trabajo o por el cumplimiento de las
+> funciones propias de su cargo […] entren en contacto con elementos materiales
+> probatorios y evidencia física, son responsables por su recolección,
+> preservación y entrega a la autoridad correspondiente.»
+
+**Consecuencia para un perito de parte:** la cadena de custodia lo obliga
+directamente, no por analogía. No es una buena práctica que adopta por
+prudencia: es el estándar con el que se mide su trabajo.
+
+### 3.2 La sustitución del objeto por su representación — art. 256
+
+Para «macroelementos» —naves, aeronaves, vehículos, máquinas, grúas y similares—
+el objeto se documenta por videograbación o fotografía, **y esas imágenes
+reemplazan al objeto físico en el juicio oral**.
+
+**Por qué importa aquí, y no es una analogía forzada:** el ordenamiento ya acepta
+que un elemento probatorio se sustituya por su representación fiel cuando
+conservar el original es impracticable. Un servidor en producción es exactamente
+ese caso — no se incauta, se copia. Lo que el artículo exige a cambio es que la
+representación sea fiel y esté documentada, que es justo lo que un sello acredita.
+
+### 3.3 Quién custodia — art. 257
+
+> «El servidor público que, en actuación de indagación o investigación policial,
+> hubiere embalado y rotulado el elemento material probatorio y evidencia física,
+> lo custodiará.»
+
+Quien embala responde. En digital, «embalar y rotular» es precisamente calcular
+la huella y levantar el acta.
+
+### 3.4 El manual vigente NO es el de la Fiscalía de 2016
+
+Conviene decirlo así de directo porque es un error fácil, y esta sección lo
+contenía: la Resolución 0-2369 de 2016 **está derogada**.
+
+El instrumento vigente es el **Manual del Sistema de Cadena de Custodia**,
+adoptado por el **Acuerdo 001 del 18 de abril de 2018 del Consejo Nacional de
+Policía Judicial** —órgano que integran, y que firman, el Fiscal General, el
+Procurador General, el Contralor General, el Director de la Policía Nacional y el
+Director del Instituto Nacional de Medicina Legal—. Su artículo 15 dispone que
+rige **dos meses después** de expedido y que desde esa fecha «se entenderán
+derogados el Manual Único de Policía Judicial aprobado mediante acta No. 053 del
+13 de mayo de 2005 [y] el Manual de Procedimientos para Cadena de Custodia
+adoptado mediante Resolución No. 0-2369 de 2016».
+
+No es un cambio de rótulo: cambia el emisor —de la Fiscalía sola a los cinco
+organismos con funciones de policía judicial— y su artículo 3 lo declara de
+aplicación nacional y «carácter vinculante y obligatorio». El artículo 6 confirma
+que las reglas obligan a «cada servidor público **y particular** que tenga
+relación con EMP y EF».
+
+Tres novedades del Acuerdo importan aquí:
+
+- **Denominación** (art. 6.a): el manual «modifica el término *procedimientos*
+  por *sistema*». Citar «Manual de Procedimientos» delata que se está citando la
+  versión vieja.
+- **Capacidad demostrativa** (art. 6.b): es el enfoque que guía esta versión, y
+  conforme a él «el objetivo último de la cadena de custodia va **más allá de la
+  autenticidad** de los EMP y EF». Es exactamente la distinción que sostiene este
+  proyecto: acreditar que algo es auténtico y acreditar que puede *demostrar* algo
+  no son la misma operación.
+- **ID o código del EMP** (art. 6.e): los formatos incorporan una casilla de
+  identificador. En digital, ese identificador estable puede ser la huella
+  criptográfica del contenido, que además no depende de quién rotule.
+
+El manual adoptado consta de **once apartados** (art. 7), entre ellos «Aspectos
+transversales al Sistema de Cadena de Custodia», «Procedimientos del Sistema» y
+«Formatos».
+
+### 3.4.1 Qué dice el manual vigente sobre evidencia digital
+
+Leído su texto completo —72 páginas—, y el resultado es más preciso, y mejor
+para este proyecto, que la hipótesis que había aquí.
+
+**Sí regula la evidencia digital, y con detalle.** Los EMP y EF «de tipo digital»
+se embalan «en bolsas antiestáticas o materiales que permitan repeler la energía
+electromagnética», y no se pasan por escáneres ni detectores de metales «para
+evitar el posible borrado o deterioro de la información en ellos contenida». Los
+dispositivos de almacenamiento —computadores, USB, discos duros— llevan fijación
+fotográfica de la pantalla, se desconectan «directamente desde la fuente de
+alimentación» y a los portátiles se les quita la batería; nada de rótulos
+adhesivos sobre la superficie ni marcadores sobre medios ópticos. Los celulares
+se mantienen encendidos y se aíslan de señales, «modo avión, bolsa Faraday, entre
+otros». Y el manual cita expresamente la **Ley 527 de 1999** al definir el
+mensaje de datos.
+
+**Y sin embargo, la palabra «hash» no aparece ni una sola vez en las 72
+páginas.** Tampoco ninguna verificación de integridad del contenido. Vale la pena
+señalarlo porque circulan fuentes secundarias que afirman lo contrario —que la
+Fiscalía introdujo el hash en el manual de cadena de custodia—; contrastado
+contra el texto, **es falso**.
+
+**El hallazgo, entonces, es este:** el modelo de riesgo del manual para lo
+digital es el **daño físico del soporte**. Lo dice él mismo: «la evidencia
+digital es susceptible a daños a consecuencia de caídas, golpes, vibraciones».
+Caída, campo electromagnético, borrado accidental. Todo lo que prescribe protege
+**el objeto que contiene los bits**; nada protege **los bits**.
+
+Un disco puede llegar al laboratorio en su bolsa antiestática, sin un rasguño,
+con la cadena de custodia impecablemente diligenciada, y con su contenido
+modificado. El sistema vigente no tiene cómo advertirlo — y esa es exactamente la
+distancia que una huella criptográfica cubre. No es un vacío por descuido: es que
+la cadena de custodia se diseñó para objetos, y un archivo no es un objeto.
+
+**Procedencia de las copias, por coherencia con lo que este proyecto predica:**
+
+| Documento | Origen | SHA-256 |
+|---|---|---|
+| Acuerdo 001 de 2018 | `medicinalegal.gov.co` — **cadena TLS que no valida**, hubo que desactivar la verificación del certificado | `de747177…89eb632` |
+| Manual del Sistema de Cadena de Custodia (72 pp., PDF de 2018-12-27) | Wayback Machine, captura del 2019-07-18 de `fiscalia.gov.co/colombia/wp-content/uploads/MANUAL-DEL-SISTEMA-DE-CADENA-DE-CUSTODIA.pdf`; **hoy esa URL da 404** | `2e060346…435c5bb` |
+
+Ninguna de las dos es una fuente primaria en sentido estricto: una llegó por un
+canal que no se pudo autenticar y la otra por un archivo de terceros porque el
+sitio oficial ya no la publica. El manual **se identifica a sí mismo** como
+adoptado por el «Acuerdo 001 de abril 18 de 2018 del Consejo Nacional de Policía
+Judicial», lo que corrobora ambos documentos entre sí. Aun así, antes de citarlos
+en un dictamen conviene pedir copia a la entidad — y la ironía no se escapa: la
+norma que regula la cadena de custodia no se consigue hoy con cadena de custodia.
+
+**Hallazgo, y es el que da sentido a este proyecto:** la resolución **no contiene
+disposiciones específicas sobre evidencia digital**. El sistema de cadena de
+custodia colombiano está construido sobre el objeto físico —embalaje, rótulo,
+traslado—, y para un disco o un buzón esas categorías hay que traducirlas. La
+traducción no está en la norma; la pone el perito, y por eso tiene que poder
+justificarla.
+
+### 3.5 Qué contenía la edición anterior, y por qué se deja escrito
+
+Leído el índice del *Manual de Procedimientos para Cadena de Custodia* —la
+edición **derogada**, la única cuyo texto pude consultar—, sus **trece
+procedimientos** (FGN-CC-\*) van del manejo del lugar de los hechos al envío al
+almacén de evidencias, la recepción en el laboratorio y la disposición final. Y
+cuando distingue categorías, las distingue **por el origen** del elemento
+—asistencia judicial con el extranjero, agente encubierto, entrega vigilada,
+entidades prestadoras de servicios de salud—, **nunca por su naturaleza**. No
+había procedimiento de evidencia digital, y no parece un descuido: el sistema
+está construido sobre el objeto que se embala, se traslada y se almacena.
+
+Se deja constancia porque es el antecedente que explica el enfoque, no como
+descripción del derecho vigente. La edición de 2018 sí incorporó lo digital,
+aunque solo en su dimensión física: ver §3.4.1.
+
+**Fuentes:** [CPP art. 254](https://leyes.co/codigo_de_procedimiento_penal/254.htm),
+[art. 255](https://leyes.co/codigo_de_procedimiento_penal/255.htm),
+[art. 256](https://leyes.co/codigo_de_procedimiento_penal/256.htm),
+[art. 257](https://leyes.co/codigo_de_procedimiento_penal/257.htm);
+[Acuerdo 001 de 2018 del Consejo Nacional de Policía Judicial (PDF, INMLCF)](https://www.medicinalegal.gov.co/documents/20143/1207211/2018_001_Manual_cadena_custodia.pdf);
+[Resolución FGN 2369 de 2016, **derogada** (normograma JEP)](https://jurinfo.jep.gov.co/normograma/compilacion/docs/resolucion_fiscalia_2369_2016.htm);
+[Manual de Procedimientos para Cadena de Custodia, edición anterior (PDF, Rama Judicial)](https://sidn.ramajudicial.gov.co/SIDN/DOCTRINA/TABLAS%20DE%20CONTENIDO%20Y%20TEXTOS%20COMPLETOS/345%20-%20DERECHO%20PROCESAL%20PENAL%20Y%20PROCESAL%20CIVIL/14843_Manual_de_procedimientos_para_Colombia.pdf).
+
+---
+
+## 4. Firma: la distinción que hay que respetar
+
+Aquí está la trampa en la que cae el marketing de casi todas las herramientas del
+sector, y por eso se documenta explícitamente.
+
+- **Firma digital** (Ley 527/1999 art. 2 lit. c, reglamentada por el Decreto 1747
+  de 2000) es una especie con requisitos propios: exige, entre otras cosas,
+  certificado emitido por una **entidad de certificación** acreditada. El
+  artículo 28 le atribuye los efectos reforzados.
+- **Firma electrónica** (Decreto 2364 de 2012, que reglamenta el art. 7 de la Ley
+  527) es el género. Vale cuando el método sea **«tan confiable como apropiado
+  para los fines con los cuales se generó o comunicó el mensaje»**, a la luz de
+  todas las circunstancias. Rige la **neutralidad tecnológica**: ninguna
+  disposición puede excluir un método que cumpla el artículo 7. Y **no** exige
+  que la emita una entidad de certificación: puede implementarla el propio
+  interesado o un proveedor de software.
+
+**Consecuencia de diseño, y es una restricción, no una ventaja:** la firma de
+Tunjo es una **firma electrónica** en el sentido del Decreto 2364 de 2012, y así
+debe llamarse siempre. Decirle «firma digital» sería atribuirle un régimen que no
+tiene. Lo que la hace *confiable y apropiada* es demostrable: clave bajo control
+exclusivo del perito, cifrada con contraseña; algoritmos publicados; verificación
+por cualquier tercero sin intervención del firmante; y código del verificador
+abierto.
+
+Si en un caso concreto se necesita el régimen del artículo 28, la salida es
+firmar el acta con un certificado de una entidad de certificación acreditada —
+que es compatible: se firma el mismo JSON.
+
+**Fuentes:** [Decreto 2364 de 2012 — MinTIC](https://normograma.mintic.gov.co/mintic/compilacion/docs/decreto_2364_2012.htm);
+[Decreto 2364 de 2012 — Función Pública](https://www.funcionpublica.gov.co/eva/gestornormativo/norma.php?i=50583).
+
+---
+
+## 5. Fecha cierta: el límite honesto
+
+El acta registra la hora del reloj de la máquina. Eso prueba **orden relativo**,
+no fecha oponible a terceros: un perito con el reloj adelantado produce un acta
+con fecha adelantada, y el sello no lo delata.
+
+Por eso el acta obliga a declarar cómo se contrastó el reloj, y si no se declara
+**escribe que no se verificó** en lugar de callarlo.
+
+**Implementado desde el 2026-07-26:** con `--sello URL`, una autoridad RFC 3161
+certifica que la firma del acta ya existía en un instante dado, y el acta lo
+declara en su numeral 6. Sin esa opción, el acta sigue probando orden relativo y
+lo dice.
+
+### 5.1 En Colombia eso tiene régimen propio, y encaja
+
+**Verificado en fuente primaria**, y el resultado es mejor de lo esperado: el
+sellado de tiempo no es aquí un servicio informal, sino una **actividad
+acreditada**.
+
+- El **artículo 161, numeral 5, del Decreto Ley 019 de 2012** enumera entre las
+  actividades de las entidades de certificación digital: «ofrecer o facilitar los
+  servicios de registro y **estampado cronológico** en la generación, transmisión
+  y recepción de mensajes de datos».
+- **ONAC** acredita esa actividad bajo el criterio **CEA-3.0-07**, y el anexo del
+  certificado lista como documento normativo del servicio, literalmente, **RFC
+  3161 (agosto 2001)** —junto con RFC 3628, RFC 5905, SHA-256 y FIPS 140-2 nivel
+  3—.
+- Ejemplo concreto y comprobado: **OLIMPIA IT S.A.S**, acreditación
+  **21-ECD-001**, con «Estampado cronológico» en el alcance aprobado y vigencia
+  hasta el 30 de junio de 2029.
+- Marco de requisitos de la entidad: Ley 527 de 1999, Decreto Ley 019 de 2012 y
+  **Decreto 333 de 2014**.
+
+**Consecuencia de diseño:** el sello de tiempo que Tunjo tiene previsto **es
+exactamente el protocolo que ONAC usa para acreditar el servicio en Colombia**.
+No hay que elegir entre lo técnicamente correcto y lo jurídicamente reconocido:
+es el mismo RFC. Al implementarlo, la fecha deja de depender del reloj del perito
+y pasa a apoyarse en un tercero acreditado — que es lo que convierte el orden
+relativo en fecha oponible.
+
+**Fuentes:** [ONAC — esquema ECD](https://onac.org.co/informacion-por-esquemas-de-acreditacion/certificacion-digital-ecd/);
+[certificado 21-ECD-001 y su anexo de alcance (PDF)](https://onac.org.co/certificados/21-ECD-001.pdf);
+[directorio de acreditados](https://onac.org.co/directorio-de-acreditados/).
+
+---
+
+## 6. Ley 2213 de 2022
+
+Da vigencia permanente al Decreto 806 de 2020 sobre uso de las TIC en las
+actuaciones judiciales. Interesa aquí porque consolida el mensaje de datos como
+vehículo ordinario del proceso: los poderes especiales pueden conferirse por
+mensaje de datos, sin firma manuscrita ni digital, con la sola antefirma, y **se
+presumen auténticos** (art. 5); las notificaciones se practican por mensaje de
+datos (art. 8). La Corte Suprema lo confirmó en STC3964 de 2023.
+
+**Lectura para el producto:** el proceso ya corre sobre mensajes de datos. Lo que
+escasea no es el reconocimiento legal del formato, sino la prueba de su
+integridad cuando alguien la discute.
+
+**Verificado** contra el texto de la ley: el **artículo 5** es el de los poderes
+—«se podrán conferir mediante mensaje de datos, sin firma manuscrita o digital,
+con la sola antefirma»— y el **artículo 8** el de las notificaciones personales
+por mensaje de datos, que se entienden surtidas transcurridos dos días hábiles
+desde el envío.
+
+### 6.1 STC3964-2023: leída, y corrige el encuadre de este proyecto
+
+Corte Suprema de Justicia, **Sala de Casación Civil y Agraria**, **STC3964-2023**,
+radicación **50001-22-13-000-2023-00022-01**, M.P. **Aroldo Wilson Quiroz
+Monsalvo**, **26 de abril de 2023**. Verificada en su texto.
+
+**Los hechos son exactamente nuestro problema.** Un litigante aportó un poder en
+PDF conferido por correo. El juzgado lo inadmitió y luego rechazó la demanda
+porque no se acreditó la «**trazabilidad**» de haberlo obtenido por mensaje de
+datos. El actor aportó un archivo `.EML` para probar el envío, y después un
+pantallazo del correo. No bastaron.
+
+**Y la Corte le dio la razón al litigante, no al juzgado.** El poder por mensaje
+de datos se presume auténtico (art. 5 de la Ley 2213), de modo que exigir prueba
+de trazabilidad es una **formalidad innecesaria** de las que el artículo 11 del
+CGP prohíbe: requerir «cadenas de correos electrónicos que permitan establecer
+una autoría o trazabilidad **que se presume por mandato legal**». El juzgado
+incurrió en defecto adjetivo y se dejó sin efecto su auto.
+
+> **Corrección al encuadre de §1, y es importante.** La presunción de
+> autenticidad es fuerte y opera sola. Vender el sello como si toda prueba
+> digital necesitara respaldo criptográfico sería **jurídicamente equivocado** —y
+> además invitaría al juez a exigir lo que esta sentencia le prohíbe exigir—.
+>
+> Donde el sello sirve es donde la presunción **no alcanza**:
+>
+>   1. Cuando el documento es **tachado de falso o desconocido** (art. 244 CGP):
+>      ahí la presunción cae y hay que probar.
+>   2. Cuando la discusión no es de **autoría** sino de **integridad**: qué decía
+>      el archivo entonces, y si cambió después. La presunción resuelve quién lo
+>      hizo, no si fue alterado.
+>   3. Cuando no hay un documento aportado por una parte sino una **masa de
+>      datos** —un disco, un buzón, un servidor— que nadie ha presentado como
+>      suyo y sobre la que no pesa presunción alguna.
+>   4. En **materia penal**, donde no rige esta presunción sino la cadena de
+>      custodia de los artículos 254 a 257.
+>
+> Fuera de esos casos, lo correcto es invocar la presunción y no ofrecer prueba
+> adicional. Un perito que aporta lo que la ley no exige no refuerza su dictamen:
+> sugiere que la presunción no le bastaba.
+
+**Y un segundo hallazgo, que amplía el alcance en vez de estrecharlo.** La Corte
+reitera que «mensaje de datos» es mucho más amplio que «mensaje de correo
+electrónico»: comprende, por el literal a) del art. 2 de la Ley 527, la
+información *generada, enviada, recibida, **almacenada** o comunicada*. En sus
+palabras, «no es solamente el que se envía a un destinatario o que circula por
+medio de las TIC sino **cualquier dato, declaración o información que repose en
+un continente tecnológico**», sea que circule o no.
+
+**Consecuencia:** un archivo en reposo en un disco es, para el derecho
+colombiano, un mensaje de datos — con todo el régimen de la Ley 527 aplicable,
+incluida la regla de integridad del art. 9 y los criterios de valoración del art.
+11. El alcance deliberado de esta herramienta (datos en reposo) no es un recorte
+técnico: coincide con el concepto legal.
+
+**Fuente:** [STC3964-2023, texto de la providencia (PDF, Universidad Externado)](https://procesal.uexternado.edu.co/wp-content/uploads/sites/9/2023/06/sentencia-de-corte-suprema-de-justicia-sala-de-casacin-civi_es.pdf).
+
+**Fuente:** [Ley 2213 de 2022 — Función Pública](https://www.funcionpublica.gov.co/eva/gestornormativo/norma.php?i=187626).
+
+---
+
+## 7. Ley 1273 de 2009 — los tipos penales
+
+Confirmado contra la compilación del MinTIC. Sirve como **catálogo de lo que hay
+que probar**, no como catálogo de lo que la herramienta detecta.
+
+| Art. | Tipo | Verbo rector | Qué habría que acreditar |
+|---|---|---|---|
+| 269A | Acceso abusivo a un sistema informático | acceder sin autorización o fuera de lo acordado, o mantenerse contra la voluntad de quien puede excluirlo | registros de autenticación y sesión; el alcance de la autorización (contrato, política); permanencia tras la revocatoria |
+| 269B | Obstaculización ilegítima de sistema o red | impedir u obstaculizar el funcionamiento o el acceso normal | disponibilidad antes/después; origen del tráfico o de la acción |
+| 269C | Interceptación de datos informáticos | interceptar en origen, destino o dentro del sistema, sin orden judicial | punto de captura; ausencia de orden; configuración del dispositivo interceptor |
+| 269D | Daño informático | destruir, dañar, borrar, deteriorar, alterar o suprimir datos o el sistema | estado anterior y posterior — aquí el sello previo es determinante |
+| 269E | Uso de software malicioso | producir, traficar, adquirir, distribuir, vender, enviar, introducir o extraer del país | la muestra, su hash, su cadena de custodia y su comportamiento |
+| 269F | Violación de datos personales | obtener, compilar, sustraer, ofrecer, vender, intercambiar, enviar, comprar, interceptar, divulgar, modificar o emplear | el conjunto de datos, su procedencia y el provecho |
+| 269G | Suplantación de sitios web para capturar datos personales | diseñar, desarrollar, traficar, vender, ejecutar, programar o enviar páginas, enlaces o ventanas emergentes; modificar la resolución de nombres de dominio | copia sellada del sitio suplantador, DNS, certificados, tiempos |
+| 269H | Circunstancias de agravación | — | redes estatales, servidor público, abuso de confianza, uso de tercero de buena fe, entre otras |
+| 269I | Hurto por medios informáticos y semejantes | manipular un sistema o suplantar usuarios ante sistemas de autenticación | trazas de la transacción y del mecanismo de autenticación |
+| 269J | Transferencia no consentida de activos | conseguir la transferencia con ánimo de lucro mediante manipulación informática | ruta del activo, ausencia de consentimiento |
+
+**Por qué está esta tabla en un proyecto de software:** porque convierte la
+adquisición en una decisión jurídica. Si la hipótesis es 269D, sellar el estado
+actual es urgente y el estado anterior es la prueba; si es 269G, lo urgente es
+capturar el sitio y su DNS antes de que caiga. **La lista dice qué recoger, y
+nunca qué concluir.**
+
+**Fuentes:** [Ley 1273 de 2009 — MinTIC](https://normograma.mintic.gov.co/mintic/compilacion/docs/ley_1273_2009.htm);
+[Diario Oficial (PDF, SIC)](https://www.sic.gov.co/recursos_user/documentos/normatividad/Ley_1273_2009.pdf);
+[Función Pública](https://www.funcionpublica.gov.co/eva/gestornormativo/norma.php?i=34492).
+
+---
+
+## 8. Estándar técnico: ISO/IEC 27037
+
+Cubre **identificación, recolección, adquisición y preservación** de evidencia
+digital — es decir, la fase inicial, que es justo donde opera Tunjo. Exige hashes
+criptográficos del original y de la copia, y verificar que coincidan; SHA-256
+como mínimo. Principios: relevancia, confiabilidad y suficiencia.
+
+Citarla en el dictamen tiene un efecto concreto: el método deja de ser «lo que
+hizo el perito» y pasa a ser un estándar internacional al que el perito se
+sujeta, que es lo que el art. 226 del CGP pregunta cuando indaga si el método
+difiere del usual en la profesión.
+
+**Estado de la norma, verificado:** la edición vigente sigue siendo la primera,
+**ISO/IEC 27037:2012**, *confirmada sin cambios en 2018*. No está retirada ni
+sustituida, así que citarla no arrastra el defecto de invocar una norma derogada.
+
+**Lo que sigue pendiente, y la regla no cambia:** el texto es de pago y no lo he
+leído; lo consultado son resúmenes técnicos y el resumen de alcance del catálogo.
+**No declarar «cumple ISO 27037» hasta leerla** — es exactamente el tipo de
+afirmación que se cae en contrainterrogatorio, y la diferencia entre «sigue los
+principios de» y «cumple» es justo la que la contraparte va a explotar.
+Relacionadas: 27041 (idoneidad del método), 27042 (análisis e interpretación),
+27043 (principios de investigación).
+
+**Fuentes:** [ISO/IEC 27037 — resumen](https://ciberseguridad.com/normativa/espana/iso-iec-27037-evidencia-digital/);
+[guía de cadena de custodia digital](https://guiacadenadecustodiadigital.wordpress.com/iso-27037/).
+
+---
+
+## 8.1 La jurisprudencia que avala el método: SP248-2025
+
+**Verificada en texto oficial** (archivo digital de la CSJ,
+`.../share/2025/3/Boletines/SP248-2025(58275).pdf`, 20 pp.,
+**SHA-256 `fa4673356b0437c8605681ae5ce2431c61e1449c79c5f4cd4f27fe47f9fe3051`**,
+Acta 029 del 12-feb-2025, M.P. Gerson Chaverra Castro). La Sala de Casación Penal
+de la Corte Suprema fija cómo se incorpora la evidencia digital, en **tres fases**:
+
+1. **Recolección/extracción** — recomienda **imagen forense con bloqueador de
+   escritura**, por personal capacitado, documentando el procedimiento; preservando
+   **integridad, identidad y mismidad**. Recuperar datos de un celular exige
+   **control posterior de legalidad** (CPP art. 236); sin él, exclusión.
+2. **Cadena de custodia** (CPP art. 254) — bajo seis criterios: **confiabilidad,
+   integralidad, inalterabilidad, accesibilidad, auditabilidad y repetibilidad**.
+   Su **ruptura NO inadmite** la prueba: reduce su mérito (CPP art. 273) y traslada
+   a quien la presenta la carga de probar la autenticidad por cualquier medio (art.
+   277).
+3. **Autenticación en juicio** — mediante **informe del experto** (CPP art. 426.4),
+   que declara y explica el bloqueador, los **valores hash** y el estado de
+   conservación. La integridad se acredita con certificado digital (Ley 527 art. 30
+   / CPP art. 426.3) o valores hash.
+
+**Dos tesis que pesan**, y confirman el diseño de este proyecto: **el hash es
+medio de acreditar integridad, no requisito legal** (su ausencia baja el mérito, no
+excluye), y **las guías técnicas (ISO 27037, Guía 13 MinTIC, Manual de la Fiscalía)
+son lineamientos, no mandatos** cuya omisión vicie por sí sola la prueba; lo que
+importa es demostrar las condiciones técnicas, la no alteración y la trazabilidad.
+
+**Cómo encaja Tunjo en cada fase — y es lo que Tunjo APORTA, no lo que CONCLUYE**
+(invariante 9: la herramienta acredita, no concluye; quien afirma el cumplimiento es
+el perito en su dictamen):
+
+| Fase / criterio de SP248-2025 | Qué pone Tunjo encima de la mesa |
+|---|---|
+| Recolección — no alteración del origen | **No escribe nunca dentro del origen** (solo lee); registra `metodo`, `herramienta` y `fundamento` (el título legal, incl. el control de legalidad si lo hubo) |
+| Integralidad / inalterabilidad | SHA-256 por elemento + **raíz de Merkle** + **firma triple** (Ed25519 + ML-DSA-87 + SLH-DSA): la aguja del hash es más fuerte que el MD5/SHA-1 que la Corte cita de ejemplo |
+| Auditabilidad | el acta y la **cadena de custodia** (`cadena.json`) encadenan y firman cada eslabón; borrar o reordenar rompe la cadena |
+| Accesibilidad / repetibilidad | **verificador público** verify-only: cualquiera (juez, contraparte) recomputa y verifica **sin intervención del perito** y sin pagar |
+| Fecha cierta | sello RFC 3161 sobre la firma (§5), que es el protocolo que ONAC acredita en Colombia |
+| Autenticación (art. 426.4) | el acta legible es el **soporte del informe del experto** que el perito anexa y defiende — no su sustituto |
+
+**El pantallazo, como lo débil** — **T-043/2020** (Corte Const., verificada en
+relatoría): las capturas de WhatsApp valen como **prueba indiciaria** «ante la
+debilidad de dichos elementos frente a la posibilidad de realizar alteraciones en
+el contenido». Es, literal, el problema que Tunjo resuelve: sella el **formato
+original** con integridad verificable, no un pantallazo.
+
+**Advertencia de verificación (D30):** existe un análisis de divulgación que
+atribuye a una providencia **SP941-2026** la reiteración ordenada de estas fases,
+pero **no se pudo confirmar en la relatoría ni en el archivo de la CSJ** y su
+radicado no se verificó — **no se cita como soporte**. SP248-2025, que sí está
+verificada con su SHA, sostiene el método por sí sola. El análisis completo de la
+jurisprudencia está en `/mnt/data/conocimiento/juridico/jurisprudencia-prueba-digital.md`.
+
+**Fuente:** CSJ Sala de Casación Penal, [SP248-2025 (rad. 58275), PDF oficial](https://archivodigitalapi.cortesuprema.gov.co/share/2025/3/Boletines/SP248-2025(58275).pdf);
+Corte Constitucional, [T-043/2020](https://www.corteconstitucional.gov.co/relatoria/2020/t-043-20.htm).
+
+---
+
+## 9. Lo que este proyecto NO hace, y por qué
+
+1. **No concluye.** Ni intrusión, ni autoría, ni responsabilidad. Un detector
+   automático de ataques mete en el dictamen una afirmación que el perito no
+   puede defender línea por línea, y con ella cae todo lo demás.
+2. **No prueba el pasado.** Acredita desde el instante de la adquisición. Si el
+   material ya venía alterado, el sello certifica fielmente material alterado.
+3. **No sustituye al perito.** El artículo 226 exige idoneidad, imparcialidad y
+   método; el software es parte del método.
+4. **No da fecha cierta** sin sello de tiempo de tercero (§5).
+
+---
+
+## 10. Nota sobre imparcialidad
+
+El artículo 226 del CGP exige que el perito jure independencia. Que el perito use
+software propio es atacable —«usted valora con su producto»—, y la respuesta no
+puede ser una promesa. Por eso el verificador es **libre y público**: cualquier
+tercero comprueba el acta con el código a la vista y sin pedirle nada al autor.
+Un sello que solo su autor puede verificar no es una prueba, es una afirmación.

@@ -1,0 +1,125 @@
+# SPDX-License-Identifier: AGPL-3.0-or-later
+# CI de tunjo: test + clippy en release. Es una herramienta de peritaje sobre
+# Quipu; que se rompa no debe descubrirse cuando haga falta sellar una prueba.
+# En RELEASE a propósito: SLH-DSA sin optimizar es tan lento que la suite lo
+# confunde con un interbloqueo (lección del commit 0b24c25).
+name: CI
+
+# CADA COMMIT SE PRUEBA UNA VEZ, no dos.
+#
+# Antes esto decía `push: branches: ["**"]` junto a `pull_request`, y una rama con
+# PR abierto disparaba LOS DOS eventos sobre el mismo commit: los checks corrían
+# por duplicado. En un repositorio PRIVADO los minutos de Actions se facturan, y
+# el 2026-07-31 el cupo de la cuenta se agotó — con esto se deja de gastarlo al
+# doble.
+#
+# `push` se queda SOLO en `main`, que es lo que verifica el commit de fusión: el
+# resultado de un squash no lo ha probado nadie hasta que existe. Las ramas las
+# cubre `pull_request`, que vuelve a correr en cada empuje mientras el PR esté
+# abierto (`synchronize`).
+#
+# LO QUE DEJA FUERA: una rama empujada SIN PR ya no tiene CI. Es deliberado — el
+# flujo es rama -> PR -> merge, y la protección de `main` exige el PR.
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+# Un empuje nuevo cancela la corrida anterior de la misma referencia: corregir un
+# PR tres veces seguidas dejaba tres corridas compitiendo cuando solo importa la
+# última. En `main` NO se cancela — cada commit de esa rama es un estado publicado
+# y su resultado tiene que quedar registrado.
+concurrency:
+  # El `-{sha}` en `main` NO es adorno: `cancel-in-progress: false` solo salva a
+  # la corrida EN CURSO — GitHub cancela las ENCOLADAS del mismo grupo. Con dos
+  # merges dentro de una ventana de CI, el commit de en medio no se medía jamás
+  # y la rama se veía verde por la corrida siguiente. Dándole a cada commit su
+  # propio grupo, la promesa del comentario de arriba se cumple de verdad.
+  group: ${{ github.workflow }}-${{ github.ref }}${{ github.ref == 'refs/heads/main' && format('-{0}', github.sha) || '' }}
+  cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
+
+permissions:
+  # Menor privilegio (supply-chain #203): este CI solo prueba, con checkout de
+  # solo lectura. Sin este bloque el GITHUB_TOKEN hereda permisos amplios.
+  contents: read
+
+jobs:
+  rust:
+    name: test + clippy (release)
+    runs-on: ubuntu-latest
+    # El techo, no la duración esperada: sin él un CI que se
+    # degrada de 4 a 48 minutos sale verde igual.
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v7
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy
+      - uses: Swatinem/rust-cache@v2
+      - name: clippy
+        run: cargo clippy --all-targets --release -- -D warnings
+      - name: test
+        run: cargo test --release
+
+  cadena-suministro:
+    name: cargo-deny (supply chain)
+    runs-on: ubuntu-latest
+    # El techo, no la duración esperada: sin él un CI que se
+    # degrada de 4 a 48 minutos sale verde igual.
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v7
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      # cargo-deny: exige que toda dependencia venga de una fuente autorizada
+      # (crates.io o el git de guaca), prohíbe comodines de versión y controla
+      # licencias — la defensa contra que una dep se traiga de una fuente
+      # inesperada (vector del ataque Atomic Arch). Config en deny.toml.
+      - name: cargo-deny
+        run: |
+          # VERSIÓN FIJADA (2026-08-14). `cargo install` NO pasa por `vendor/`:
+          # ignora la sustitución de fuentes —medido con su pareja, el mismo error
+          # dentro y fuera del repo—, así que baja de crates.io y compila los
+          # `build.rs` de su propio árbol, sin vendorizar y sin vigilar. Sin
+          # `--version` eso es «lo último publicado el día que se corra». Y
+          # `--locked` NO lo cubre: fija el lock INTERNO de la herramienta.
+          cargo install cargo-deny --locked --version 0.20.2
+          cargo deny check
+
+      # LA PUERTA DEL RE-VENDORIZADO. El árbol está congelado, así que el único
+      # momento en que puede entrar un script de construcción envenenado es al
+      # re-vendorizar — que es como entraron los gusanos de npm y del AUR: no un
+      # paquete nuevo, una VERSIÓN nueva de uno que ya usabas. Se reconstruye la
+      # herramienta en el propio paso para que un binario viejo junto a una
+      # fuente nueva no pase por vigilante al día (directiva 38).
+      - name: Lo que corre al compilar sigue siendo lo aceptado
+        run: |
+          cargo build --release --quiet --manifest-path /mnt/data/conocimiento/lo-que-corre-al-compilar/Cargo.toml
+          /mnt/data/conocimiento/lo-que-corre-al-compilar/target/release/lo-que-corre-al-compilar "$PWD"
+
+  verificador-publico:
+    name: verificador público (--no-default-features)
+    runs-on: ubuntu-latest
+    # El verificador público (verify-only) es el binario que un TERCERO —juez,
+    # contraparte— ejecuta gratis. Su promesa —no puede sellar, y da el MISMO
+    # veredicto que el completo— vive solo en el `cfg` de la superficie CLI de
+    # main.rs. Sin este job, una variante de escritura nueva a la que se le olvide
+    # `#[cfg(feature = "sellar")]` entraría al binario público y el CI seguiría
+    # verde: el concilio del 2026-09-09 lo señaló (invariante inexpresable). Aquí
+    # la promesa la vigila una máquina, sobre el ARTEFACTO público, no a mano
+    # (directivas 28 y 31).
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v7
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy
+      - uses: Swatinem/rust-cache@v2
+      - name: clippy sin la feature `sellar`
+        run: cargo clippy --all-targets --release --no-default-features -- -D warnings
+      - name: veredictos sobre el binario PÚBLICO
+        # `veredictos` ejerce el binario por CARGO_BIN_EXE_tunjo y fija el
+        # invariante 3 (los tres comandos de verificación no se contradicen).
+        # Compilado sin `sellar`, mide el artefacto que de verdad usa el juez.
+        run: cargo test --release --no-default-features --test veredictos

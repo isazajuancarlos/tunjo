@@ -1,0 +1,38 @@
+# SPDX-FileCopyrightText: 2026 Juan Carlos Isaza
+# SPDX-License-Identifier: AGPL-3.0-or-later
+#
+# Verificador de actas de tunjo compilado a wasm32 para correr en el NAVEGADOR:
+# el juez/contraparte arrastra el acta.json y los archivos, y verifica en su propia
+# máquina, sin instalar nada y sin subir nada a ningún servidor. Reusa la MISMA
+# verificación de `tunjo` (feature `sellar` APAGADA → sin `ureq`/rustls/ring, que no
+# compilan a wasm y que un verificador no necesita).
+[package]
+name = "verificador-wasm"
+version = "0.1.0"
+edition = "2021"
+license = "AGPL-3.0-or-later"
+publish = false
+
+[lib]
+crate-type = ["cdylib"]
+
+[dependencies]
+tunjo = { path = "..", default-features = false }
+wasm-bindgen = "0.2"
+sha2 = "0.11"
+serde_json = "1"
+# Backends de aleatoriedad para wasm32. NO se usan en verificación (el nonce del
+# sello es de la ruta de SELLADO, apagada aquí), pero el árbol los compila. Hay dos
+# getrandom en el árbol: 0.4 (de tunjo, via `getrandom::fill`) y 0.2 (transitiva de
+# rand_core/quipu). Se activan sus backends web por unificación de features; la 0.4
+# además exige RUSTFLAGS `--cfg getrandom_backend="wasm_js"` (ver .cargo/config.toml).
+getrandom = { version = "0.4", features = ["wasm_js"] }
+getrandom_02 = { package = "getrandom", version = "0.2", features = ["js"] }
+
+# SIN `[profile.release]` propio: cargo lo IGNORA en un miembro que no es la raíz del
+# workspace y lo dice («profiles for the non root package will be ignored»). MEDIDO el
+# 2026-10-12 (concilio): con o sin el bloque, el .wasm sale 1.46 MB — el bloque no hacía
+# nada. Encogerlo con `lto`/`opt="s"` exigiría ponerlo en la RAÍZ, lo que frenaría el
+# SLH-DSA/Argon2id del binario de SELLADO (el CLAUDE.md pide velocidad para la cripto);
+# y `wasm-opt` es una herramienta externa que el repo no trae. Para una descarga única y
+# cacheada del verificador, 1.46 MB es aceptable y no se paga ni en cripto ni en deps.

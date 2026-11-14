@@ -1,0 +1,41 @@
+/target/
+
+# Material de casos y sus actas: NUNCA entran al repositorio.
+*.clave
+acta*.json
+acta*.md
+/casos/
+/evidencia/
+
+# ... PERO los FIXTURES del banco sí (son sintéticos, no material real), y las
+# reglas de arriba los barrían: `acta_2026.json` es el vector fijo que ancla que
+# las actas ya entregadas sigan verificando, y `src/acta.rs` lo mete por
+# `include_str!` (macro de COMPILACIÓN) → sin él `cargo test`/`cargo clippy` NO
+# COMPILAN en un clon fresco, y el fixture no estaba en el espejo ni en ningún
+# respaldo. Es el mismo agujero que `!vendor/**` (abajo), cazado por el concilio
+# del 2026-09-28 (sonnet+fable, reproducido con CARGO_HOME vacío). Se re-incluye
+# el árbol ENTERO para cerrar la clase: un futuro `.clave`/`acta*.md` de banco
+# también quedaría barrido.
+!tests/fijos/**
+# ...MENOS una clave: `.clave` NUNCA se versiona, ni siquiera de banco (los tests
+# la generan inline con `tempfile`, nunca de un fixture). Sin esta línea, el
+# `!tests/fijos/**` de arriba REABRÍA el agujero que `*.clave` cierra —una regla
+# de negación posterior gana— y una clave privada de perito caída aquí por error
+# quedaría rastreable. Emparejamiento D23 del propio fix, cazado por el concilio
+# (revisor haiku, 2026-09-28).
+tests/fijos/*.clave
+
+conversaciones/
+
+# --- vendor/: árbol GENERADO, y ninguna regla de arriba le aplica ---
+# Medido el 2026-08-14 CLONANDO: `git status` no lista lo ignorado, así que un
+# archivo comido por una regla global (`target/`, `*.bin`, `*.key`) no se ve
+# hasta que el clon no compila con `failed to open file vendor/…`.
+!vendor/**
+
+# Artefactos generados del verificador WASM: se construyen con
+# verificador-wasm/construir.sh en el despliegue, no se versionan (no son
+# byte-reproducibles por la ruta de compilacion incrustada; D31).
+sitio/verificador/verificador_wasm*.js
+sitio/verificador/verificador_wasm*.wasm
+sitio/verificador/verificador_wasm*.d.ts
